@@ -32,6 +32,8 @@ Connection: close
 # nonce
 # state
 
+OAuthParameters = ["client_id", "redirect_uri", "response_type", "scope", "state"]
+
 IMPLICIT_FLOW=0
 CODE_FLOW=1
 # Dict in the form oauth_mode[HOSTNAME]=FLOW
@@ -57,7 +59,8 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
         callbacks.registerProxyListener(self)
 
         # register ourselves as a custom scanner check
-        callbacks.registerScannerCheck(self)
+        #Commented out because it errored on running
+        #callbacks.registerScannerCheck(self)
         
         # register ourselves as an extension state listener
         callbacks.registerExtensionStateListener(self)
@@ -70,22 +73,35 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
 
     def processHttpMessage(self, toolFlag, messageIsRequest, messageInfo):
         # Check if Message is a Response, and see what tool it came from. This is just helping with print formatting and tracking.
-        print("messageInfo: ", messageInfo)
+        #print("messageInfo: ", messageInfo)
         if messageIsRequest:
-            if str(self._callbacks.getToolName(toolFlag)) == "Extender":
-                print("Extension is making a Request")
-            else:
-                print("Incomimg Tool Flag = " + str(self._callbacks.getToolName(toolFlag)) + " Message is Request")
+            if str(self._callbacks.getToolName(toolFlag)) == "Proxy":
+                #print("Proxy is receiving a Request")
+                analyzedRequest = self._helpers.analyzeRequest(messageInfo.getRequest())
+                #print ("Headers are: ", analyzedRequest.getHeaders())
+                if analyzedRequest.getParameters():
+                    analyzedParameters = analyzedRequest.getParameters()
+                    for parameter in analyzedParameters:
+                        #print parameter.getName().lower()
+                        for OAuthParameter in OAuthParameters:
+                            #print "OauthParameter", OAuthParameter
+                            #print "Parameter", parameter.getName()
+                            if parameter.getName().lower()  == OAuthParameter:
+                                print "FOUND AN OAUTH PARAMETER", OAuthParameter
+                        
+                
+            #else:
+                #print("Incomimg Tool Flag = " + str(self._callbacks.getToolName(toolFlag)) + " Message is Request")
         
         else:
             responseInfo = self._helpers.analyzeResponse(messageInfo.getResponse())
             responseReceived = self._helpers.bytesToString(messageInfo.getResponse()).encode('utf-8')
-            print("responseInfo: ", responseInfo)
-            print("responseReceived: ", responseReceived)
+            #print("responseInfo: ", responseInfo)
+            #print("responseReceived: ", responseReceived)
             if str(self._callbacks.getToolName(toolFlag)) == "Extender":
                 print("Extensions Response has been Received")
-            else:
-                print("Incomimg Tool Flag = " + str(self._callbacks.getToolName(toolFlag)) + " Message is Response")
+            #else:
+                #print("Incomimg Tool Flag = " + str(self._callbacks.getToolName(toolFlag)) + " Message is Response")
                 
         # Check if Request and Check if Tool is Repeater or Scanner (Those are the tools we care about at the moment)
         # if not messageIsRequest and (str(self._callbacks.getToolName(toolFlag)) == "Repeater" or str(self._callbacks.getToolName(toolFlag)) == "Scanner"):
