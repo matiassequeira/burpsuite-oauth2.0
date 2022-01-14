@@ -7,20 +7,21 @@ from burp import IProxyListener
 from burp import IScannerListener
 from burp import IExtensionStateListener
 from burp import IScannerCheck
+from burp import IContextMenuFactory 
 from burp import IScanIssue
 from array import array
 from java.io import PrintWriter
 from java.net import URL
+from java.util import ArrayList
+from javax.swing import JMenuItem
 
 
 
 # response_type=code vs response_type=id_token or response_type=token . Guess it will change from host to host? We should therefore use a sort of heuristic?
 
+oauth_urls_identified=[]
 
-
-oauth_urls_identified={}
-
-class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListener, IExtensionStateListener):
+class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListener, IExtensionStateListener, IContextMenuFactory):
     def registerExtenderCallbacks(self, callbacks):
         # keep a reference to our callbacks object
         self._callbacks = callbacks
@@ -45,12 +46,42 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
         
         # register ourselves as an extension state listener
         self._callbacks.registerExtensionStateListener(self)
+        self._callbacks.registerContextMenuFactory(self)
 
         self._helpers = self._callbacks.getHelpers()
-        print(self._helpers)
+        
+        print("OAuth2.0 Extender was loaded successfully")
 
     def extensionUnloaded(self):
-        print("Extension was unloaded")
+        print("OAuth2.0 Extender unloaded successfully")
+    
+    def createMenuItems(self, invocation):
+        self._context = invocation
+        menuList = ArrayList()
+
+        invocation_allowed = [invocation.CONTEXT_MESSAGE_EDITOR_REQUEST, invocation.CONTEXT_PROXY_HISTORY,
+                              invocation.CONTEXT_TARGET_SITE_MAP_TABLE, invocation.CONTEXT_TARGET_SITE_MAP_TREE,
+                              invocation.CONTEXT_MESSAGE_VIEWER_REQUEST, invocation.CONTEXT_INTRUDER_ATTACK_RESULTS, 
+                              invocation.CONTEXT_INTRUDER_PAYLOAD_POSITIONS, invocation.CONTEXT_SCANNER_RESULTS, 
+                              invocation.CONTEXT_SEARCH_RESULTS]
+
+        # TODO should we allow the user to send multiple messages?
+        if self._context.getInvocationContext() in invocation_allowed and len(self._context.selectedMessages) == 1:
+            parentMenu = JMenuItem('Send to OAuth2.0 Extender', actionPerformed=self.MenuAction)
+            menuList.add(parentMenu)
+
+        # TODO delete this
+        # Request info
+        # iRequestInfo = self._helpers.analyzeRequest(self._context.getSelectedMessages()[0])
+        # self.setData(iRequestInfo)
+
+        return menuList
+
+    def MenuAction(self, event):
+        
+        messageInfo = self._context.getSelectedMessages()[0]
+        self.detect_oauth(messageInfo)
+
 
     def processHttpMessage(self, toolFlag, messageIsRequest, messageInfo):
         # Check if Message is a Response, and see what tool it came from. This is just helping with print formatting and tracking.
@@ -59,8 +90,9 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
             if str(self._callbacks.getToolName(toolFlag)) == "Proxy":
                 #print("Proxy is receiving a Request")
                 analyzedRequest = self._helpers.analyzeRequest(messageInfo.getRequest())
-                self.detect_oauth(messageInfo, analyzedRequest)
-                    
+                self.detect_oauth(messageInfo)
+            else:
+                print("WARNING: got message from unidentified tool")
         
         else:
             responseInfo = self._helpers.analyzeResponse(messageInfo.getResponse())
@@ -70,7 +102,8 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
             if str(self._callbacks.getToolName(toolFlag)) == "Extender":
                 print("Extensions Response has been Received")
                 
-    def detect_oauth(self, message_info, analyzed_request):
+    def detect_oauth(self, message_info):
+        analyzed_request= self._helpers.analyzeRequest(message_info.getRequest())
         oauth_parameters = { "client_id": False,
                             "response_type" : False,
                             "redirect_uri": False,
@@ -114,9 +147,12 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
     def start_security_checks(self, message_info, analyzed_request, response_type):
         message_service = message_info.getHttpService()
         if "token" in response_type:
+            print("Creating new scan issue: Using OAuth Implicit Mode")
             self._callbacks.addScanIssue(CustomScanIssue(   
                                                         message_service, 
-                                                        message_info, message_service.getProtocol() + "://" + message_service.getHost(), 
+                                                        # message_service.getProtocol() + "://" + message_service.getHost(), 
+                                                        analyzed_request.getUrl(),
+                                                        message_info, 
                                                         "Using OAuth Implicit Mode",
                                                         "TODO Detail",
                                                         "Medium",
