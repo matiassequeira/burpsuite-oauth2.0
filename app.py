@@ -6,15 +6,14 @@ from burp import IHttpListener
 from burp import IProxyListener
 from burp import IScannerListener
 from burp import IExtensionStateListener
-from burp import IScannerCheck
 from burp import IContextMenuFactory 
 from burp import IScanIssue
-from array import array
+
 from java.io import PrintWriter
-from java.net import URL
 from java.util import ArrayList
 from javax.swing import JMenuItem
 
+import sys
 
 
 # response_type=code vs response_type=id_token or response_type=token . Guess it will change from host to host? We should therefore use a sort of heuristic?
@@ -133,41 +132,46 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
                 if str(message_service) not in oauth_urls_identified:
                     oauth_urls_identified.append(str(message_service))
                     print("------   New OAuth Identified   ------")
-                    print("URL observed was : " + message_service.getProtocol() + "://" + message_service.getHost() + " using Port : " + str(message_service.getPort()))
+                    print("URL observed was : " + str(message_info.getUrl()))
                     if response_type_identified:
                         print("-- Authorization Type Detected as : " + response_type_identified + " --")
-                    print(" Parameters observed in the request indicating OAuth presence were :")
+                    print(" Parameters observed in the request indicating OAuth presence were:")
                     for item, value in oauth_parameters.items():
                         if value == True:
                             print("     > " + item)
-                    self.start_security_checks(message_info, analyzed_request, response_type_identified)
+                    try:
+                        self.start_security_checks(message_info, analyzed_request, response_type_identified)
+                    except:
+                        print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+                        
                 else:
-                    print("Existing OAuth Url Observed : " + message_service.getProtocol() + "://" + message_service.getHost())
+                    print("Existing OAuth Url Observed : " + str(message_info.getUrl()))
 
     def start_security_checks(self, message_info, analyzed_request, response_type):
         message_service = message_info.getHttpService()
+        print("Starting security checks:")
         if "token" in response_type:
-            print("Creating new scan issue: Using OAuth Implicit Mode")
-            self._callbacks.addScanIssue(CustomScanIssue(   
-                                                        message_service, 
-                                                        # message_service.getProtocol() + "://" + message_service.getHost(), 
-                                                        analyzed_request.getUrl(),
-                                                        message_info, 
-                                                        "Using OAuth Implicit Mode",
-                                                        "TODO Detail",
-                                                        "Medium",
-                                                        "Certain",
-                                                        "TODO Remediation"
-                                                        ))
+            issue=CustomScanIssue(   
+                                message_service, 
+                                message_info.getUrl(),
+                                [message_info], 
+                                "Using OAuth Implicit Mode",
+                                "TODO Detail",
+                                "Medium",
+                                "Certain",
+                                "TODO Remediation"
+                                )
+            print("New issue: " + issue.getIssueName())
+            self._callbacks.addScanIssue(issue)
             
         elif "code" in response_type:
             return
         else: 
-            print("response_type not recognized. Please contact support")
+            print("'response_type' not recognized. Please contact support")
         return
 
 
-class CustomScanIssue (IScanIssue):
+class CustomScanIssue(IScanIssue):
     def __init__(self, httpService, url, httpMessages, name, detail, severity, confidence, remediation_detail):
         self._httpService = httpService
         self._url = url
