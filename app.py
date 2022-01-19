@@ -107,7 +107,8 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
                             "response_type" : False,
                             "redirect_uri": False,
                             "scope": False, 
-                            "state": False 
+                            "state": False,
+                            "nonce": False 
                             }
         
         oauth_identified = False # TODO will this be used?
@@ -140,14 +141,14 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
                         if value == True:
                             print("     > " + item)
                     try:
-                        self.start_security_checks(message_info, analyzed_request, response_type_identified)
+                        self.start_security_checks(message_info, analyzed_request, response_type_identified, analyzed_parameters, oauth_parameters )
                     except:
                         print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
                         
                 else:
                     print("Existing OAuth Url Observed : " + str(message_info.getUrl()))
 
-    def start_security_checks(self, message_info, analyzed_request, response_type):
+    def start_security_checks(self, message_info, analyzed_request, response_type, analyzed_parameters, oauth_parameters):
         message_service = message_info.getHttpService()
         print("Starting security checks:")
         if "token" in response_type:
@@ -163,12 +164,46 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
                                 )
             print("New issue: " + issue.getIssueName())
             self._callbacks.addScanIssue(issue)
-            
+            #Start Check if State Paremeter is present and report
+            if oauth_parameters["state"] == False:
+                print("No, Value: ''State'  does not exists in dictionary")
+                print ("Response Type 'Implicit Grant' Detected without State Paremeter")
+                issue=CustomScanIssue(   
+                                    message_service, 
+                                    message_info.getUrl(),
+                                    [message_info], 
+                                    "Using OAuth Implicit Mode withouth State Parameter",
+                                    "TODO Detail",
+                                    "Medium",
+                                    "Certain",
+                                    "TODO Remediation"
+                                    )
+                print("New issue: " + issue.getIssueName())
+                self._callbacks.addScanIssue(issue)
+            #End Check if Nonce Paremeter is present and report
+            if oauth_parameters["nonce"] == False:
+                print("No, Value: ''Nonce'  does not exists in dictionary")
+                print ("Response Type 'Implicit Grant' Detected without Nonce Paremeter")
+                issue=CustomScanIssue(   
+                                    message_service, 
+                                    message_info.getUrl(),
+                                    [message_info], 
+                                    "Using OAuth Implicit Mode withouth Nonce Parameter",
+                                    "TODO Detail",
+                                    "Medium",
+                                    "Certain",
+                                    "TODO Remediation"
+                                    )
+                print("New issue: " + issue.getIssueName())
+                self._callbacks.addScanIssue(issue)
+            #End Check if State Paremeter is present and report
+                
         elif "code" in response_type:
             return
         else: 
             print("'response_type' not recognized. Please contact support")
         return
+
 
 
 class CustomScanIssue(IScanIssue):
@@ -214,3 +249,4 @@ class CustomScanIssue(IScanIssue):
 
     def getHttpService(self):
         return self._httpService
+        
