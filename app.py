@@ -108,7 +108,9 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
                             "redirect_uri": False,
                             "scope": False, 
                             "state": False,
-                            "nonce": False 
+                            "nonce": False,
+                            "code_challenge": False,
+                            "code_challenge_method": False
                             }
         
         oauth_identified = False # TODO will this be used?
@@ -130,8 +132,8 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
             if oauth_parameters["client_id"] and oauth_parameters["response_type"]:
                 oauth_identified = True
                 message_service = message_info.getHttpService()
-                if str(message_service) not in oauth_urls_identified:
-                    oauth_urls_identified.append(str(message_service))
+                if str(message_service) + ":" + str(response_type_identified) not in oauth_urls_identified:
+                    oauth_urls_identified.append(str(message_service) + ":" + str(response_type_identified))
                     print("------   New OAuth Identified   ------")
                     print("URL observed was : " + str(message_info.getUrl()))
                     if response_type_identified:
@@ -151,19 +153,49 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
     def start_security_checks(self, message_info, analyzed_request, response_type, analyzed_parameters, oauth_parameters):
         message_service = message_info.getHttpService()
         print("Starting security checks:")
-        if "token" in response_type:
-            issue=CustomScanIssue(   
-                                message_service, 
-                                message_info.getUrl(),
-                                [message_info], 
-                                "Using OAuth Implicit Mode",
-                                "TODO Detail",
-                                "Medium",
-                                "Certain",
-                                "TODO Remediation"
-                                )
-            print("New issue: " + issue.getIssueName())
-            self._callbacks.addScanIssue(issue)
+        #Start Check if Implicit Mode by "Token" in response_type or Authorizaiton Code Mode by "code" in response_type
+        if "token" or "code" in response_type:
+            if "token" in response_type:
+                issue=CustomScanIssue(   
+                                    message_service, 
+                                    message_info.getUrl(),
+                                    [message_info],
+                                    "Using OAuth Implicit Mode",
+                                    "TODO Detail",
+                                    "Medium",
+                                    "Certain",
+                                    "TODO Remediation"
+                                    )
+                print("New issue: " + issue.getIssueName())
+                self._callbacks.addScanIssue(issue)
+            else: #"code" is in response_type indicating Authorization Code Mode
+                issue=CustomScanIssue(   
+                                    message_service, 
+                                    message_info.getUrl(),
+                                    [message_info],
+                                    "Using OAuth Authorization Code Mode",
+                                    "TODO Detail",
+                                    "Medium",
+                                    "Certain",
+                                    "TODO Remediation"
+                                    )
+                print("New issue: " + issue.getIssueName())
+                self._callbacks.addScanIssue(issue)
+                #check for PKCE Parameters in Auth Code Mode Request
+                if oauth_parameters["code_challenge"] or oauth_parameters["code_challenge_method"] == False:
+                    issue=CustomScanIssue(   
+                                        message_service, 
+                                        message_info.getUrl(),
+                                        [message_info],
+                                        "Using OAuth Authorization Code Mode without PKCE",
+                                        "TODO Detail",
+                                        "Medium",
+                                        "Certain",
+                                        "TODO Remediation"
+                                        )
+                    print("New issue: " + issue.getIssueName())
+                    self._callbacks.addScanIssue(issue)
+                #end check for PKCE Parameters in Auth Code Mode Request
             #Start Check if State Paremeter is present and report
             if oauth_parameters["state"] == False:
                 print("No, Value: ''State'  does not exists in dictionary")
@@ -180,11 +212,11 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
                                     )
                 print("New issue: " + issue.getIssueName())
                 self._callbacks.addScanIssue(issue)
-            #End Check if Nonce Paremeter is present and report
-            if oauth_parameters["nonce"] == False:
-                print("No, Value: ''Nonce'  does not exists in dictionary")
-                print ("Response Type 'Implicit Grant' Detected without Nonce Paremeter")
-                issue=CustomScanIssue(   
+                #End Check if Nonce Paremeter is present and report
+                if oauth_parameters["nonce"] == False:
+                    print("No, Value: ''Nonce'  does not exists in dictionary")
+                    print ("Response Type 'Implicit Grant' Detected without Nonce Paremeter")
+                    issue=CustomScanIssue(   
                                     message_service, 
                                     message_info.getUrl(),
                                     [message_info], 
@@ -194,12 +226,10 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
                                     "Certain",
                                     "TODO Remediation"
                                     )
-                print("New issue: " + issue.getIssueName())
-                self._callbacks.addScanIssue(issue)
-            #End Check if State Paremeter is present and report
+                    print("New issue: " + issue.getIssueName())
+                    self._callbacks.addScanIssue(issue)
+                    #End Check if State Paremeter is present and report
                 
-        elif "code" in response_type:
-            return
         else: 
             print("'response_type' not recognized. Please contact support")
         return
