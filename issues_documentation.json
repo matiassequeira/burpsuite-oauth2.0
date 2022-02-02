@@ -1,51 +1,58 @@
 {
      "using_implicit_mode":{
         "name":"Using OAuth Implicit Mode",
-        "detail":"TODO Detail",
+        "issue_background":"TODO Issue Background",
         "severity":"Medium",
         "confidence":"Certain",
         "remediation_detail":"TODO Remediation"
     },
     "using_code_mode":{
         "name":"Using OAuth Authorization Code Mode",
-        "detail":"TODO Detail",
+        "issue_background":"TODO Issue Background",
         "severity":"Information",
         "confidence":"Certain",
         "remediation_detail":"TODO Remediation"
     },
     "code_mode_without_PKCE":{
         "name":"Using OAuth Authorization Code Mode without PKCE",
-        "detail":"TODO Detail",
+        "issue_background":"TODO Issue Background",
         "severity":"Medium",
         "confidence":"Certain",
         "remediation_detail":"TODO Remediation"
     },
     "implicit_mode_without_state":{
         "name":"Using OAuth Implicit Mode withouth State Parameter",
-        "detail":"TODO Detail",
+        "issue_background":"TODO Issue Background",
         "severity":"Medium",
         "confidence":"Certain",
         "remediation_detail":"TODO Remediation"
     },
     "implicit_mode_without_nonce":{
         "name":"Using OAuth Implicit Mode without Nonce Parameter",
-        "detail":"TODO Detail",
+        "issue_background":"TODO Issue Background",
         "severity":"Medium",
         "confidence":"Certain",
         "remediation_detail":"TODO Remediation"
     },
     "access_code_as_URL_parameter":{
         "name":"Passing Access Code as parameter in URL",
-        "detail":"TODO Detail",
+        "issue_background":"TODO Issue Background",
         "severity":"High",
         "confidence":"Certain",
         "remediation_detail":"TODO Remediation"
     },
     "access_token_as_URL_parameter":{
         "name":"Passing Access Token as parameter in URL",
-        "detail":"TODO Detail",
+        "issue_background":"TODO Issue Background",
         "severity":"High",
         "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    },
+    "tampered_state_parameter_allowed":{
+        "name":"Server does not validate State parameter",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Tentative",
         "remediation_detail":"TODO Remediation"
     }
 }
