@@ -49,7 +49,7 @@
         "remediation_detail":"TODO Remediation"
     },
     "tampered_state_parameter_allowed":{
-        "name":"Server does not validate State parameter",
+        "name":"Server accepts modified State parameter",
         "issue_background":"TODO Issue Background",
         "severity":"High",
         "confidence":"Tentative",
