@@ -18,6 +18,8 @@ import json
 import random
 import string
 from thread import start_new_thread
+from urlparse import urlparse
+import time
 
 f = open('issues_documentation.json')
 issues_documentation = json.load(f)
@@ -52,6 +54,8 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
         self._callbacks.registerContextMenuFactory(self)
 
         self._helpers = self._callbacks.getHelpers()
+
+        self._collaborator = self._callbacks.createBurpCollaboratorClientContext()
         
         print("OAuth2.0 Extender was loaded successfully")
 
@@ -181,14 +185,19 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 if oauth_parameters["code_challenge"] or oauth_parameters["code_challenge_method"] == False:
                     self.create_new_issue("code_mode_without_PKCE",message_service,message_info.getUrl(),[message_info])
                 
-            if oauth_parameters["state"] == False:
+            if not oauth_parameters["state"]:
                 print ("Response Type 'Implicit Grant' Detected without State Paremeter")
                 self.create_new_issue("implicit_mode_without_state",message_service,message_info.getUrl(),[message_info])
 
-                if oauth_parameters["nonce"] == False:
-                    print("No, Value: 'Nonce'  does not exist in dictionary")
-                    print ("Response Type 'Implicit Grant' Detected without Nonce Paremeter")
-                    self.create_new_issue("implicit_mode_without_nonce",message_service,message_info.getUrl(),[message_info])
+            if not oauth_parameters["nonce"]:
+                print("No, Value: 'Nonce'  does not exist in dictionary")
+                print ("Response Type 'Implicit Grant' Detected without Nonce Paremeter")
+                self.create_new_issue("implicit_mode_without_nonce",message_service,message_info.getUrl(),[message_info])
+            
+            if oauth_parameters["redirect_uri"]:
+                self.redirect_uri_checks(message_info)
+            else:
+                start_new_thread(self.inject_redirect_uri, (message_info,False,))
                 
         elif response_type: 
             print("'response_type' " + response_type + "not recognized. Please contact support")
@@ -212,7 +221,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 if contains_parameters(analyzed_parameters, ["token", "code"]):
                     if contains_parameters(analyzed_parameters, ["state"]):
                         print("Tampering State parameter..")
-                        start_new_thread(self.tamper_state_parameter, (message_info,))
+                        self.state_parameter_checks(message_info)
                                 
         return
     
@@ -228,49 +237,229 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
         self._callbacks.addScanIssue(issue)
     
 
+    def redirect_uri_checks(self, message_info):
+        analyzed_request= self._helpers.analyzeRequest(message_info.getRequest())
+        analyzed_parameters = analyzed_request.getParameters()
 
-    def tamper_state_parameter(self, message_info):
+        for parameter in analyzed_parameters:
+            if 'redirect' in parameter.getName().lower():
+                start_new_thread(self.tamper_redirect_uri_with_subdomain, (message_info, parameter,))
+                start_new_thread(self.tamper_redirect_uri_with_path_traversal, (message_info, parameter,))
+                start_new_thread(self.tamper_redirect_uri_with_collab_domain, (message_info, parameter,))
+                start_new_thread(self.tamper_redirect_uri_with_top_level_domain, (message_info, parameter,))
+                start_new_thread(self.inject_redirect_uri, (message_info, True,))
+                start_new_thread(self.tamper_redirect_uri_with_localhost_in_collab_domain, (message_info, parameter,))
+                start_new_thread(self.tamper_redirect_uri_with_parsing_discrepancies, (message_info, parameter,))
+                break
+        return
+
+
+    def tamper_redirect_uri_with_subdomain(self,message_info, parameter):
+        try:    
+            param_value= parameter.getValue()
+            
+            decoded_url= self._helpers.urlDecode(param_value)
+            is_url_encoded= False if len(param_value)==decoded_url else False
+
+            parsed_url= urlparse(decoded_url)
+            parsed_url= parsed_url._replace(netloc='test-subdomain.'+parsed_url.netloc)
+            
+            new_param_value=parsed_url.geturl()
+            if is_url_encoded:
+                new_param_value= self._helpers.urlEncode(new_param_value)
+
+            self.send_request_and_fire_alert(message_info, parameter, new_param_value, "subdomain_allowed_in_redirect_uri")
+        except:
+            print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+
+
+    def tamper_redirect_uri_with_path_traversal(self,message_info, parameter):
+        try:    
+            param_value= parameter.getValue()
+            
+            decoded_url= self._helpers.urlDecode(param_value)
+            is_url_encoded= False if len(param_value)==decoded_url else False
+
+            parsed_url= urlparse(decoded_url)
+            parsed_url= parsed_url._replace(path= parsed_url.path + '../')
+            
+            new_param_value=parsed_url.geturl()
+            if is_url_encoded:
+                new_param_value= self._helpers.urlEncode(new_param_value)
+
+            self.send_request_and_fire_alert(message_info, parameter, new_param_value, "directory_traversal_in_redirect_uri")
+        except:
+            print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+
+    
+    def tamper_redirect_uri_with_collab_domain(self, message_info, parameter):
         try:
+            param_value= parameter.getValue()
+            decoded_url= self._helpers.urlDecode(param_value)
+            is_url_encoded= False if len(param_value)==decoded_url else False
+
+            payload=self._collaborator.generatePayload(False)
+            new_param_value= 'https://'+payload
+            if is_url_encoded:
+                new_param_value= self._helpers.urlEncode(new_param_value)
+
+            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri")
+
+            # Wait a prudent time to see if any request was issued to the collab payload
+            time.sleep(60)
+            collab_interactions= self._collaborator.fetchCollaboratorInteractionsFor(payload)
+            if collab_interactions:
+                details= get_collabs_interactions_summary(collab_interactions)
+                self.create_new_issue('tampered_redirect_uri_with_redirection', message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], details)
+        except:
+            print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+
+
+    def tamper_redirect_uri_with_top_level_domain(self, message_info, parameter):
+        try:    
+            param_value= parameter.getValue()
+            
+            decoded_url= self._helpers.urlDecode(param_value)
+            is_url_encoded= False if len(param_value)==decoded_url else False
+
+            parsed_url= urlparse(decoded_url)
+            parsed_url= parsed_url._replace(path= '')
+            
+            new_param_value=parsed_url.geturl()
+            if is_url_encoded:
+                new_param_value= self._helpers.urlEncode(new_param_value)
+
+            self.send_request_and_fire_alert(message_info, parameter, new_param_value, "top_level_domain_allowed_in_redirect_uri")
+        except:
+            print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+
+
+    def inject_redirect_uri(self, message_info, redirect_uri_is_present):
+        try:
+            payload=self._collaborator.generatePayload(False)
+            new_param_value= 'https://'+payload
+            new_param_value= self._helpers.urlEncode(new_param_value)
+
+            new_param= self._helpers.buildParameter('redirect_uri', new_param_value, IParameter.PARAM_URL)
+
+            if redirect_uri_is_present:
+                modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "polluted_redirect_uri_allowed")
+            else:
+                modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "injected_redirect_uri_allowed")
+
+            # Wait a prudent time to see if any request was issued to the collab payload
+            time.sleep(60)
+            collab_interactions= self._collaborator.fetchCollaboratorInteractionsFor(payload)
+            if collab_interactions:
+                details= get_collabs_interactions_summary(collab_interactions)
+                if redirect_uri_is_present:
+                    self.create_new_issue('polluted_redirect_uri_allowed_with_redirection', message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], details)
+                else:
+                    self.create_new_issue('injected_redirect_uri_allowed_with_redirection', message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], details)
+        except:
+            print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+    
+    
+    def tamper_redirect_uri_with_localhost_in_collab_domain(self,message_info, parameter):
+        try:
+            param_value= parameter.getValue()
+            decoded_url= self._helpers.urlDecode(param_value)
+            is_url_encoded= False if len(param_value)==decoded_url else False
+
+            payload=self._collaborator.generatePayload(False)
+            new_param_value= 'https://localhost.'+payload
+            if is_url_encoded:
+                new_param_value= self._helpers.urlEncode(new_param_value)
+
+            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri_localhost")
+
+            # Wait a prudent time to see if any request was issued to the collab payload
+            time.sleep(60)
+            collab_interactions= self._collaborator.fetchCollaboratorInteractionsFor(payload)
+            if collab_interactions:
+                details= get_collabs_interactions_summary(collab_interactions)
+                self.create_new_issue('tampered_redirect_uri_localhost_with_redirection', message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], details)
+        except:
+            print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+
+
+    def tamper_redirect_uri_with_parsing_discrepancies(self,message_info, parameter):
+        
+    
+    
+    def state_parameter_checks(self, message_info):
             analyzed_request= self._helpers.analyzeRequest(message_info.getRequest())
             analyzed_parameters = analyzed_request.getParameters()
 
             for parameter in analyzed_parameters:
                 if 'state' in parameter.getName().lower():
-                    param_value= parameter.getValue()
-                    new_param_value= changeChar(param_value, random.randrange(1,len(param_value)))
-
-                    new_request= self._helpers.updateParameter(message_info.getRequest(), self._helpers.buildParameter(
-                        parameter.getName(),
-                        new_param_value,
-                        parameter.getType()
-                    ))
-
-                    modified_message_info= self._callbacks.makeHttpRequest(message_info.getHttpService(), new_request)
-                    response_variations= self._helpers.analyzeResponseVariations([message_info.getResponse(), modified_message_info.getResponse()])
-                    variant_attributes= response_variations.getVariantAttributes()
-                    details=''
-                    for variant in variant_attributes:
-                        details=details+"Variation: "+variant
-                        details=details+" Original response: "+str(response_variations.getAttributeValue(variant, 0))
-                        details=details+" Modified response: "+str(response_variations.getAttributeValue(variant, 1))+"\n"
-                    
-                    original_response_status_code= self._helpers.analyzeResponse(message_info.getResponse()).getStatusCode()
-                    modified_response_status_code= self._helpers.analyzeResponse(modified_message_info.getResponse()).getStatusCode()
-                    
-                    if original_response_status_code == modified_response_status_code:
-                        self.create_new_issue("tampered_state_parameter_allowed",message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], details)
-
+                    start_new_thread(self.state_parameter_checks, (message_info, parameter,))
+                    start_new_thread(self.replay_state_parameter, (message_info, parameter,))
+                    start_new_thread(self.assess_state_parameter_entropy, (message_info, parameter,))
                     break
-
             return
+
+    
+    def assess_state_parameter_entropy(self, message_info, parameter):
+        # TODO
+        return
+    
+    
+    def tamper_state_parameter(self, message_info, parameter):
+        try:
+            param_value= parameter.getValue()
+            new_param_value= changeChar(param_value, random.randrange(1,len(param_value)))
+            self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_state_parameter_allowed")
         except:
             print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+        
+
+    def replay_state_parameter(self, message_info, parameter):
+        try:
+            self.send_request_and_fire_alert(message_info, parameter, parameter.getValue(), "replayed_state_parameter_allowed")
+        except:
+            print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+
+
+    def send_request_and_fire_alert(self, message_info, parameter, new_param_value, issue_id):
+        if new_param_value is None:
+            new_request= self._helpers.addParameter(message_info.getRequest(), parameter)
+        else:
+            new_request= self._helpers.updateParameter(message_info.getRequest(), self._helpers.buildParameter(
+                parameter.getName(),
+                new_param_value,
+                parameter.getType()
+            ))
+        modified_message_info= self._callbacks.makeHttpRequest(message_info.getHttpService(), new_request)
+        
+        details=self.get_variations_summary(message_info, modified_message_info)
+        if self.equal_status_code(message_info, modified_message_info):
+            self.create_new_issue(issue_id, message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], details)
+            return modified_message_info
+        
+
+    def get_variations_summary(self, first_message_info, second_message_info):
+        response_variations= self._helpers.analyzeResponseVariations([first_message_info.getResponse(), second_message_info.getResponse()])
+        variant_attributes= response_variations.getVariantAttributes()
+        details=''
+        for variant in variant_attributes:
+            details=details+"Variation: "+variant
+            details=details+" Original response: "+str(response_variations.getAttributeValue(variant, 0))
+            details=details+" Modified response: "+str(response_variations.getAttributeValue(variant, 1))+"\n"
+        return details
+    
+    def equal_status_code(self, first_message_info, second_message_info):
+        first_response_status_code= self._helpers.analyzeResponse(first_message_info.getResponse()).getStatusCode()
+        second_response_status_code= self._helpers.analyzeResponse(second_message_info.getResponse()).getStatusCode()
+        return first_response_status_code==second_response_status_code
+
 
 def contains_parameters(analyzed_parameters_list, lookup_param_list):
     for parameter in analyzed_parameters_list:
         for matching_param in lookup_param_list:
             if matching_param in parameter.getName().lower():
                 return matching_param
+
 
 def changeChar(buf, pos):
     chars= string.ascii_uppercase + string.digits + string.ascii_lowercase
@@ -280,6 +469,17 @@ def changeChar(buf, pos):
     buf = buf[:pos-1] + str(val)  + buf[pos:]
     print("New buf: "+buf)
     return buf
+
+def get_collabs_interactions_summary(collab_interactions):
+    details=''
+    for interaction in collab_interactions:
+        details= details + 'Collaborator Interaction\n'
+        for int_name, int_value in interaction.getProperties().items():
+            if int_name in ['request', 'response', 'raw_query']:
+                details= details + int_name + " in Base64: " + int_value + "\n"
+            else:
+                details= details + int_name + ": " + int_value + "\n"
+    return details
 
 # def repeatByte(buf, pos, cant):
 #     print("Repeating byte offset=%d, value=%r, cant=%i"%(pos-1, buf[pos-1], cant))
