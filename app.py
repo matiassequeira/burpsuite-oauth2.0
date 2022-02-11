@@ -20,6 +20,7 @@ import string
 from thread import start_new_thread
 from urlparse import urlparse
 import time
+import urllib
 
 f = open('issues_documentation.json')
 issues_documentation = json.load(f)
@@ -101,9 +102,9 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                     self.detect_oauth(messageInfo)
                 except:
                     print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
-            else:
-                print("WARNING: got message from unidentified tool: " + str(self._callbacks.getToolName(toolFlag)))
-                print(self._helpers.bytesToString(messageInfo.getRequest()).encode('utf-8'))
+            # else:
+            #     print("WARNING: got message from unidentified tool: " + str(self._callbacks.getToolName(toolFlag)))
+            #     print(self._helpers.bytesToString(messageInfo.getRequest()).encode('utf-8'))
               
     def detect_oauth(self, message_info):
         analyzed_request= self._helpers.analyzeRequest(message_info.getRequest())
@@ -137,7 +138,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                         
             if oauth_parameters["client_id"] and oauth_parameters["response_type"]:
                 oauth_identified = True
-                print("HTTP service: ", str(message_service)) #Delete this print
+                print("HTTP service: " + str(message_service)) #Delete this print
                 if str(message_service) not in oauth_urls_identified:
                     oauth_urls_identified[str(message_service)]=[str(response_type_identified)]
                     print("------   New OAuth Identified   ------")
@@ -250,142 +251,219 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 start_new_thread(self.inject_redirect_uri, (message_info, True,))
                 start_new_thread(self.tamper_redirect_uri_with_localhost_in_collab_domain, (message_info, parameter,))
                 start_new_thread(self.tamper_redirect_uri_with_parsing_discrepancies, (message_info, parameter,))
+                start_new_thread(self.tamper_redirect_uri_with_as_path, (message_info, parameter,))
+                start_new_thread(self.tamper_redirect_uri_with_redirect_to, (message_info, parameter,))
                 break
         return
 
 
     def tamper_redirect_uri_with_subdomain(self,message_info, parameter):
+        print("tamper_redirect_uri_with_subdomain") 
         try:    
             param_value= parameter.getValue()
             
             decoded_url= self._helpers.urlDecode(param_value)
-            is_url_encoded= False if len(param_value)==decoded_url else False
+            is_url_encoded= False if len(param_value)==len(decoded_url) else True
 
             parsed_url= urlparse(decoded_url)
-            parsed_url= parsed_url._replace(netloc='test-subdomain.'+parsed_url.netloc)
+
+            has_www=False
+            if 'www.' in parsed_url.netloc:
+                has_www=True
+                parsed_url= parsed_url._replace(netloc=parsed_url.netloc.replace('www.','',1))
+
+            if has_www:
+                parsed_url= parsed_url._replace(netloc='www.test-subdomain.'+parsed_url.netloc)
+            else:
+                parsed_url= parsed_url._replace(netloc='test-subdomain.'+parsed_url.netloc)
             
             new_param_value=parsed_url.geturl()
             if is_url_encoded:
-                new_param_value= self._helpers.urlEncode(new_param_value)
+                new_param_value= urllib.quote(new_param_value, safe='')
+                
 
             self.send_request_and_fire_alert(message_info, parameter, new_param_value, "subdomain_allowed_in_redirect_uri")
         except:
-            print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+            print("Unexpected error tamper_redirect_uri_with_subdomain: ", sys.exc_info()[0], sys.exc_info()[1])
 
 
     def tamper_redirect_uri_with_path_traversal(self,message_info, parameter):
+        print("tamper_redirect_uri_with_path_traversal")
         try:    
             param_value= parameter.getValue()
             
             decoded_url= self._helpers.urlDecode(param_value)
-            is_url_encoded= False if len(param_value)==decoded_url else False
+            is_url_encoded= False if len(param_value)==len(decoded_url) else True
 
             parsed_url= urlparse(decoded_url)
-            parsed_url= parsed_url._replace(path= parsed_url.path + '../')
+            
+            if parsed_url.path.endswith("/"):
+                parsed_url= parsed_url._replace(path= parsed_url.path + '../')
+            else:
+                parsed_url= parsed_url._replace(path= parsed_url.path + '/../')
             
             new_param_value=parsed_url.geturl()
             if is_url_encoded:
-                new_param_value= self._helpers.urlEncode(new_param_value)
+                new_param_value= urllib.quote(new_param_value, safe='')
+                
 
             self.send_request_and_fire_alert(message_info, parameter, new_param_value, "directory_traversal_in_redirect_uri")
         except:
-            print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+            print("Unexpected error tamper_redirect_uri_with_path_traversal: ", sys.exc_info()[0], sys.exc_info()[1])
 
     
     def tamper_redirect_uri_with_collab_domain(self, message_info, parameter):
+        print("tamper_redirect_uri_with_collab_domain")
         try:
             param_value= parameter.getValue()
             decoded_url= self._helpers.urlDecode(param_value)
-            is_url_encoded= False if len(param_value)==decoded_url else False
+            is_url_encoded= False if len(param_value)==len(decoded_url) else True
 
-            payload=self._collaborator.generatePayload(False)
+            payload=self._collaborator.generatePayload(True)
+            # print("Payload is "+payload)
             new_param_value= 'https://'+payload
             if is_url_encoded:
-                new_param_value= self._helpers.urlEncode(new_param_value)
+                new_param_value= urllib.quote(new_param_value, safe='')
 
             modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri")
-
-            # Wait a prudent time to see if any request was issued to the collab payload
-            time.sleep(60)
-            collab_interactions= self._collaborator.fetchCollaboratorInteractionsFor(payload)
-            if collab_interactions:
-                details= get_collabs_interactions_summary(collab_interactions)
-                self.create_new_issue('tampered_redirect_uri_with_redirection', message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], details)
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tampered_redirect_uri_with_redirection')
+            
         except:
-            print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+            print("Unexpected error tamper_redirect_uri_with_collab_domain: ", sys.exc_info()[0], sys.exc_info()[1])
 
 
     def tamper_redirect_uri_with_top_level_domain(self, message_info, parameter):
+        print("tamper_redirect_uri_with_top_level_domain")
         try:    
             param_value= parameter.getValue()
             
             decoded_url= self._helpers.urlDecode(param_value)
-            is_url_encoded= False if len(param_value)==decoded_url else False
+            is_url_encoded= False if len(param_value)==len(decoded_url) else True
 
             parsed_url= urlparse(decoded_url)
             parsed_url= parsed_url._replace(path= '')
             
             new_param_value=parsed_url.geturl()
             if is_url_encoded:
-                new_param_value= self._helpers.urlEncode(new_param_value)
+                new_param_value= urllib.quote(new_param_value, safe='')
 
             self.send_request_and_fire_alert(message_info, parameter, new_param_value, "top_level_domain_allowed_in_redirect_uri")
         except:
-            print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+            print("Unexpected error tamper_redirect_uri_with_top_level_domain: ", sys.exc_info()[0], sys.exc_info()[1])
 
 
     def inject_redirect_uri(self, message_info, redirect_uri_is_present):
+        print("inject_redirect_uri")
         try:
-            payload=self._collaborator.generatePayload(False)
+            payload=self._collaborator.generatePayload(True)
             new_param_value= 'https://'+payload
-            new_param_value= self._helpers.urlEncode(new_param_value)
-
+            new_param_value= urllib.quote(new_param_value, safe='')
+            # print("Payload is "+payload)
             new_param= self._helpers.buildParameter('redirect_uri', new_param_value, IParameter.PARAM_URL)
 
             if redirect_uri_is_present:
                 modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "polluted_redirect_uri_allowed")
             else:
                 modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "injected_redirect_uri_allowed")
+            
+            if redirect_uri_is_present:
+                self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'polluted_redirect_uri_allowed_with_redirection')
+            else:
+                self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'injected_redirect_uri_allowed_with_redirection')
 
-            # Wait a prudent time to see if any request was issued to the collab payload
-            time.sleep(60)
-            collab_interactions= self._collaborator.fetchCollaboratorInteractionsFor(payload)
-            if collab_interactions:
-                details= get_collabs_interactions_summary(collab_interactions)
-                if redirect_uri_is_present:
-                    self.create_new_issue('polluted_redirect_uri_allowed_with_redirection', message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], details)
-                else:
-                    self.create_new_issue('injected_redirect_uri_allowed_with_redirection', message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], details)
         except:
-            print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+            print("Unexpected error inject_redirect_uri: ", sys.exc_info()[0], sys.exc_info()[1])
     
     
     def tamper_redirect_uri_with_localhost_in_collab_domain(self,message_info, parameter):
+        print("tamper_redirect_uri_with_localhost_in_collab_domain")
         try:
             param_value= parameter.getValue()
             decoded_url= self._helpers.urlDecode(param_value)
-            is_url_encoded= False if len(param_value)==decoded_url else False
+            is_url_encoded= False if len(param_value)==len(decoded_url) else True
 
-            payload=self._collaborator.generatePayload(False)
+            payload=self._collaborator.generatePayload(True)
+            # print("Payload is "+payload)
             new_param_value= 'https://localhost.'+payload
             if is_url_encoded:
-                new_param_value= self._helpers.urlEncode(new_param_value)
+                new_param_value= urllib.quote(new_param_value, safe='')
 
             modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri_localhost")
-
-            # Wait a prudent time to see if any request was issued to the collab payload
-            time.sleep(60)
-            collab_interactions= self._collaborator.fetchCollaboratorInteractionsFor(payload)
-            if collab_interactions:
-                details= get_collabs_interactions_summary(collab_interactions)
-                self.create_new_issue('tampered_redirect_uri_localhost_with_redirection', message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], details)
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tampered_redirect_uri_localhost_with_redirection')
         except:
-            print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+            print("Unexpected error tamper_redirect_uri_with_localhost_in_collab_domain: ", sys.exc_info()[0], sys.exc_info()[1])
 
 
     def tamper_redirect_uri_with_parsing_discrepancies(self,message_info, parameter):
-        
+        # https://default-host.com&@foo.evil-user.net#@bar.evil-user.net/
+        print("tamper_redirect_uri_with_parsing_discrepancies")
+        try:
+            param_value= parameter.getValue()
+            decoded_url= self._helpers.urlDecode(param_value)
+            is_url_encoded= False if len(param_value)==len(decoded_url) else True
+            print("URL encoded", is_url_encoded, len(param_value), len(decoded_url))
+            payloads= [self._collaborator.generatePayload(True), self._collaborator.generatePayload(True)]
+            parsed_url= urlparse(decoded_url)
+            parsed_url= parsed_url._replace(netloc=parsed_url.netloc+'&@'+payloads[0]+'#@'+payloads[1])
+            new_param_value=parsed_url.geturl()
+            if is_url_encoded:
+                new_param_value= urllib.quote(new_param_value, safe='')
+
+            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tamper_redirect_uri_parsing_discrepancies")
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, payloads, 'tamper_redirect_uri_parsing_discrepancies_with_redirection')
+                
+        except:
+            print("Unexpected error tamper_redirect_uri_with_parsing_discrepancies: ", sys.exc_info()[0], sys.exc_info()[1])
+
+    def tamper_redirect_uri_with_as_path(self,message_info, parameter):
+        # This check is suppossed to work with code flow only. We use it for both options
+        print("tamper_redirect_uri_with_as_path")
+        try:
+            param_value= parameter.getValue()
+            decoded_url= self._helpers.urlDecode(param_value)
+            is_url_encoded= False if len(param_value)==len(decoded_url) else True
+
+            parsed_url= urlparse(decoded_url)
+            payload=self._collaborator.generatePayload(True)
+            # print("Payload is "+payload)
+            new_param_value= 'https://'+payload+'/'+parsed_url.netloc+parsed_url.path
+            if is_url_encoded:
+                new_param_value= urllib.quote(new_param_value, safe='')
+
+            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri_as_collab_path")
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tampered_redirect_uri_as_collab_path_with_redirection')
+        except:
+            print("Unexpected error tamper_redirect_uri_with_as_path: ", sys.exc_info()[0], sys.exc_info()[1])
     
+    def tamper_redirect_uri_with_redirect_to(self, message_info, parameter):
+        # This check is suppossed to work with implicit flow only. We use it for both options
+        print("tamper_redirect_uri_with_redirect_to")
+        try:
+            param_value= parameter.getValue()
+            decoded_url= self._helpers.urlDecode(param_value)
+            is_url_encoded= False if len(param_value)==len(decoded_url) else True
+
+            payload=self._collaborator.generatePayload(True)
+            # print("Payload is "+payload)
+
+            if is_url_encoded:
+                new_param_value= urllib.quote(decoded_url+ urllib.quote('&redirect_to=https://'+payload+'/' , safe=''), safe='')
+            else:
+                new_param_value= urllib.quote(decoded_url+ '&redirect_to=https://'+payload+'/', safe='')
+
+            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri_redirect_to")
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tampered_redirect_uri_redirect_to_with_redirection')
+        except:
+            print("Unexpected error tamper_redirect_uri_with_redirect_to: ", sys.exc_info()[0], sys.exc_info()[1])
+    
+    def fetch_collab_interactions_and_fire_alert(self, message_info, modified_message_info, payload_list, issue_id):
+        # Wait a prudent time to see if any request was issued to the collab payload
+        time.sleep(60)
+        for payload in payload_list:
+            collab_interactions= self._collaborator.fetchCollaboratorInteractionsFor(payload)
+            if collab_interactions:
+                details= get_collabs_interactions_summary(collab_interactions)
+                self.create_new_issue(issue_id, message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], details)
     
     def state_parameter_checks(self, message_info):
             analyzed_request= self._helpers.analyzeRequest(message_info.getRequest())
