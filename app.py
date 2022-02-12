@@ -247,8 +247,9 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 start_new_thread(self.tamper_redirect_uri_with_subdomain, (message_info, parameter,))
                 start_new_thread(self.tamper_redirect_uri_with_path_traversal, (message_info, parameter,))
                 start_new_thread(self.tamper_redirect_uri_with_collab_domain, (message_info, parameter,))
+                start_new_thread(self.tamper_redirect_uri_with_collab_domain, (message_info, parameter, True))
                 start_new_thread(self.tamper_redirect_uri_with_top_level_domain, (message_info, parameter,))
-                start_new_thread(self.inject_redirect_uri, (message_info, True,))
+                start_new_thread(self.inject_redirect_uri, (message_info,))
                 start_new_thread(self.tamper_redirect_uri_with_localhost_in_collab_domain, (message_info, parameter,))
                 start_new_thread(self.tamper_redirect_uri_with_parsing_discrepancies, (message_info, parameter,))
                 start_new_thread(self.tamper_redirect_uri_with_as_path, (message_info, parameter,))
@@ -258,7 +259,6 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
 
     def tamper_redirect_uri_with_subdomain(self,message_info, parameter):
-        print("tamper_redirect_uri_with_subdomain") 
         try:    
             param_value= parameter.getValue()
             
@@ -267,13 +267,8 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
             parsed_url= urlparse(decoded_url)
 
-            has_www=False
             if 'www.' in parsed_url.netloc:
-                has_www=True
-                parsed_url= parsed_url._replace(netloc=parsed_url.netloc.replace('www.','',1))
-
-            if has_www:
-                parsed_url= parsed_url._replace(netloc='www.test-subdomain.'+parsed_url.netloc)
+                parsed_url= parsed_url._replace(netloc='www.test-subdomain.'+parsed_url.netloc.replace('www.','',1))
             else:
                 parsed_url= parsed_url._replace(netloc='test-subdomain.'+parsed_url.netloc)
             
@@ -288,7 +283,6 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
 
     def tamper_redirect_uri_with_path_traversal(self,message_info, parameter):
-        print("tamper_redirect_uri_with_path_traversal")
         try:    
             param_value= parameter.getValue()
             
@@ -312,28 +306,34 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             print("Unexpected error tamper_redirect_uri_with_path_traversal: ", sys.exc_info()[0], sys.exc_info()[1])
 
     
-    def tamper_redirect_uri_with_collab_domain(self, message_info, parameter):
-        print("tamper_redirect_uri_with_collab_domain")
+    def tamper_redirect_uri_with_collab_domain(self, message_info, parameter, pollute_redirect_uri=False):
         try:
             param_value= parameter.getValue()
             decoded_url= self._helpers.urlDecode(param_value)
             is_url_encoded= False if len(param_value)==len(decoded_url) else True
 
             payload=self._collaborator.generatePayload(True)
-            # print("Payload is "+payload)
-            new_param_value= 'https://'+payload
+            
+            parsed_url= urlparse(decoded_url)
+            parsed_url= parsed_url._replace(netloc=payload)
+
+            new_param_value=parsed_url.geturl()
             if is_url_encoded:
                 new_param_value= urllib.quote(new_param_value, safe='')
 
-            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri")
-            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tampered_redirect_uri_with_redirection')
+            if pollute_redirect_uri:
+                new_param= self._helpers.buildParameter('redirect_uri', new_param_value, IParameter.PARAM_URL)
+                modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "polluted_redirect_uri_allowed")
+                self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'polluted_redirect_uri_allowed_with_redirection')
+            else:
+                modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri")
+                self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tampered_redirect_uri_with_redirection')
             
         except:
             print("Unexpected error tamper_redirect_uri_with_collab_domain: ", sys.exc_info()[0], sys.exc_info()[1])
 
 
     def tamper_redirect_uri_with_top_level_domain(self, message_info, parameter):
-        print("tamper_redirect_uri_with_top_level_domain")
         try:    
             param_value= parameter.getValue()
             
@@ -352,39 +352,31 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             print("Unexpected error tamper_redirect_uri_with_top_level_domain: ", sys.exc_info()[0], sys.exc_info()[1])
 
 
-    def inject_redirect_uri(self, message_info, redirect_uri_is_present):
-        print("inject_redirect_uri")
+    def inject_redirect_uri(self, message_info):
         try:
             payload=self._collaborator.generatePayload(True)
             new_param_value= 'https://'+payload
-            new_param_value= urllib.quote(new_param_value, safe='')
-            # print("Payload is "+payload)
+            new_param_value= urllib.quote(new_param_value, safe='')          
             new_param= self._helpers.buildParameter('redirect_uri', new_param_value, IParameter.PARAM_URL)
 
-            if redirect_uri_is_present:
-                modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "polluted_redirect_uri_allowed")
-            else:
-                modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "injected_redirect_uri_allowed")
-            
-            if redirect_uri_is_present:
-                self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'polluted_redirect_uri_allowed_with_redirection')
-            else:
-                self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'injected_redirect_uri_allowed_with_redirection')
-
+            modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "injected_redirect_uri_allowed")
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'injected_redirect_uri_allowed_with_redirection')
         except:
             print("Unexpected error inject_redirect_uri: ", sys.exc_info()[0], sys.exc_info()[1])
     
     
     def tamper_redirect_uri_with_localhost_in_collab_domain(self,message_info, parameter):
-        print("tamper_redirect_uri_with_localhost_in_collab_domain")
         try:
             param_value= parameter.getValue()
             decoded_url= self._helpers.urlDecode(param_value)
             is_url_encoded= False if len(param_value)==len(decoded_url) else True
 
             payload=self._collaborator.generatePayload(True)
-            # print("Payload is "+payload)
-            new_param_value= 'https://localhost.'+payload
+
+            parsed_url= urlparse(decoded_url)
+            parsed_url= parsed_url._replace(netloc='localhost.'+payload)
+            
+            new_param_value= parsed_url.geturl()
             if is_url_encoded:
                 new_param_value= urllib.quote(new_param_value, safe='')
 
@@ -396,12 +388,11 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
     def tamper_redirect_uri_with_parsing_discrepancies(self,message_info, parameter):
         # https://default-host.com&@foo.evil-user.net#@bar.evil-user.net/
-        print("tamper_redirect_uri_with_parsing_discrepancies")
         try:
             param_value= parameter.getValue()
             decoded_url= self._helpers.urlDecode(param_value)
             is_url_encoded= False if len(param_value)==len(decoded_url) else True
-            print("URL encoded", is_url_encoded, len(param_value), len(decoded_url))
+
             payloads= [self._collaborator.generatePayload(True), self._collaborator.generatePayload(True)]
             parsed_url= urlparse(decoded_url)
             parsed_url= parsed_url._replace(netloc=parsed_url.netloc+'&@'+payloads[0]+'#@'+payloads[1])
@@ -417,7 +408,6 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
     def tamper_redirect_uri_with_as_path(self,message_info, parameter):
         # This check is suppossed to work with code flow only. We use it for both options
-        print("tamper_redirect_uri_with_as_path")
         try:
             param_value= parameter.getValue()
             decoded_url= self._helpers.urlDecode(param_value)
@@ -425,34 +415,32 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
             parsed_url= urlparse(decoded_url)
             payload=self._collaborator.generatePayload(True)
-            # print("Payload is "+payload)
+            
             new_param_value= 'https://'+payload+'/'+parsed_url.netloc+parsed_url.path
             if is_url_encoded:
                 new_param_value= urllib.quote(new_param_value, safe='')
 
-            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri_as_collab_path")
-            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tampered_redirect_uri_as_collab_path_with_redirection')
+            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tamper_redirect_uri_as_collab_path")
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tamper_redirect_uri_as_collab_path_with_redirection')
         except:
             print("Unexpected error tamper_redirect_uri_with_as_path: ", sys.exc_info()[0], sys.exc_info()[1])
     
     def tamper_redirect_uri_with_redirect_to(self, message_info, parameter):
         # This check is suppossed to work with implicit flow only. We use it for both options
-        print("tamper_redirect_uri_with_redirect_to")
         try:
             param_value= parameter.getValue()
             decoded_url= self._helpers.urlDecode(param_value)
             is_url_encoded= False if len(param_value)==len(decoded_url) else True
 
             payload=self._collaborator.generatePayload(True)
-            # print("Payload is "+payload)
 
             if is_url_encoded:
                 new_param_value= urllib.quote(decoded_url+ urllib.quote('&redirect_to=https://'+payload+'/' , safe=''), safe='')
             else:
                 new_param_value= urllib.quote(decoded_url+ '&redirect_to=https://'+payload+'/', safe='')
 
-            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri_redirect_to")
-            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tampered_redirect_uri_redirect_to_with_redirection')
+            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tamper_redirect_uri_with_redirect_to")
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tamper_redirect_uri_with_redirect_to_with_redirection')
         except:
             print("Unexpected error tamper_redirect_uri_with_redirect_to: ", sys.exc_info()[0], sys.exc_info()[1])
     
@@ -554,7 +542,7 @@ def get_collabs_interactions_summary(collab_interactions):
         details= details + 'Collaborator Interaction\n'
         for int_name, int_value in interaction.getProperties().items():
             if int_name in ['request', 'response', 'raw_query']:
-                details= details + int_name + " in Base64: " + int_value + "\n"
+                details= details + int_name + " (Base64): " + int_value + "\n"
             else:
                 details= details + int_name + ": " + int_value + "\n"
     return details

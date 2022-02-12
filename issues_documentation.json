@@ -153,14 +153,14 @@
         "confidence":"Certain",
         "remediation_detail":"TODO Remediation"
     },
-    "tampered_redirect_uri_as_collab_path":{
+    "tamper_redirect_uri_as_collab_path":{
         "name":"Server accepts different redirect_uri as path in collaborator URL - potential Open Redirection",
         "issue_background":"TODO Issue Background",
         "severity":"High",
         "confidence":"Tentative",
         "remediation_detail":"TODO Remediation"
     },
-    "tampered_redirect_uri_as_collab_path_with_redirection":{
+    "tamper_redirect_uri_as_collab_path_with_redirection":{
         "name":"Server accepts different redirect_uri as path in collaborator URL - Open Redirection",
         "issue_background":"TODO Issue Background",
         "severity":"High",
