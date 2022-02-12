@@ -505,6 +505,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
         
 
     def get_variations_summary(self, first_message_info, second_message_info):
+        # TODO printing this stuff might not be neccessary because Burp already allows the user to compare reponses
         response_variations= self._helpers.analyzeResponseVariations([first_message_info.getResponse(), second_message_info.getResponse()])
         variant_attributes= response_variations.getVariantAttributes()
         details=''
@@ -541,10 +542,8 @@ def get_collabs_interactions_summary(collab_interactions):
     for interaction in collab_interactions:
         details= details + 'Collaborator Interaction\n'
         for int_name, int_value in interaction.getProperties().items():
-            if int_name in ['request', 'response', 'raw_query']:
-                details= details + int_name + " (Base64): " + int_value + "\n"
-            else:
-                details= details + int_name + ": " + int_value + "\n"
+            if int_name in ['protocol', 'type', 'query_type', 'client_ip', 'time_stamp']:
+                details= details + int_name + ": " + int_value + '\n'                
     return details
 
 # def repeatByte(buf, pos, cant):
