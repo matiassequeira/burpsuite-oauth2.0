@@ -28,7 +28,7 @@ issues_documentation = json.load(f)
 # response_type=code vs response_type=id_token or response_type=token . Guess it will change from host to host? We should therefore use a sort of heuristic?
 
 oauth_urls_identified=dict()
-latest_oauth_server=None
+latest_oauth_server=dict()
 
 class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionStateListener, IContextMenuFactory):
     def registerExtenderCallbacks(self, callbacks):
@@ -121,7 +121,6 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                             }
         
         oauth_identified = False # TODO will this be used?
-        response_type_identified = None
         #print ("Headers are: ", analyzed_request.getHeaders())
         if analyzed_request.getParameters():
             analyzed_parameters = analyzed_request.getParameters()
@@ -132,60 +131,66 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                     #print "Parameter", parameter.getName()
                     if parameter.getName().lower()  == oauth_parameter:
                         #print "FOUND AN OAUTH PARAMETER", oauth_parameter
-                        oauth_parameters[oauth_parameter] = True
-                        if parameter.getName().lower() == "response_type":
-                            response_type_identified = parameter.getValue().lower()
+                        oauth_parameters[oauth_parameter] = parameter.getValue().lower()
                         
             if oauth_parameters["client_id"] and oauth_parameters["response_type"]:
                 oauth_identified = True
                 print("HTTP service: " + str(message_service)) #Delete this print
                 if str(message_service) not in oauth_urls_identified:
-                    oauth_urls_identified[str(message_service)]=[str(response_type_identified)]
+                    oauth_urls_identified[str(message_service)]=[ oauth_parameters["response_type"] ]
                     print("------   New OAuth Identified   ------")
                     print("URL observed was : " + str(message_info.getUrl()))
                     print(" Parameters observed in the request indicating OAuth presence were:")
                     for item, value in oauth_parameters.items():
                         if value == True:
                             print("     > " + item)
-                    if response_type_identified:
-                        print("-- Authorization Type Detected as : " + response_type_identified + " --")
-                        latest_oauth_server=str(message_service)
-                        self.start_security_checks(message_info, analyzed_request, response_type_identified, analyzed_parameters, oauth_parameters )
+                    print("-- Authorization Type Detected as : " + oauth_parameters['response_type'] + " --")               
+
+                    self.start_security_checks(message_info, analyzed_request, analyzed_parameters, oauth_parameters )
 
                     
-                elif str(response_type_identified) not in oauth_urls_identified[str(message_service)]:
-                    oauth_urls_identified[str(message_service)].append([str(response_type_identified)])
+                elif oauth_parameters["response_type"] not in oauth_urls_identified[str(message_service)]:
+                    oauth_urls_identified[str(message_service)].append( oauth_parameters["response_type"] )
                     print("------   Existing OAuth With Different Flow Identified   ------")
                     print("URL observed was : " + str(message_info.getUrl()))
                     print(" Parameters observed in the request indicating OAuth presence were:")
                     for item, value in oauth_parameters.items():
                         if value == True:
                             print("     > " + item)
-                    if response_type_identified:
-                        print("-- Authorization Type Detected as : " + response_type_identified + " --")
-                        latest_oauth_server=str(message_service)
-                        self.start_security_checks(message_info, analyzed_request, response_type_identified, analyzed_parameters, oauth_parameters )
+                    print("-- Authorization Type Detected as : " + oauth_parameters["response_type"] + " --")
+
+                    self.start_security_checks(message_info, analyzed_request, analyzed_parameters, oauth_parameters )
                 
                 else:
                     print("Existing OAuth Url Observed: " + str(message_service) + " (" + str(message_info.getUrl()) + ")")
         
             else:
-                self.start_security_checks(message_info, analyzed_request, None, analyzed_parameters, oauth_parameters)
+                self.start_security_checks(message_info, analyzed_request, analyzed_parameters, oauth_parameters)
 
-    def start_security_checks(self, message_info, analyzed_request, response_type, analyzed_parameters, oauth_parameters):
+    def start_security_checks(self, message_info, analyzed_request, analyzed_parameters, oauth_parameters):
         message_service = message_info.getHttpService()
+        response_type= oauth_parameters["response_type"]
+
         print("Starting security checks:")
         #Start Check if Implicit Mode by "Token" in response_type or Authorizaiton Code Mode by "code" in response_type
         if response_type and ("token" or "code" in response_type):
+
+            # Store some information that will be used to analyze the callback (redirect) request
+            latest_oauth_server['server_url']=str(message_service)
+            
+            
+            # Perform checks according to response_type - Implicit (token) or Code modes
             if "token" in response_type:
                 self.create_new_issue("using_implicit_mode",message_service,message_info.getUrl(),[message_info])
 
-            else: #"code" is in response_type indicating Authorization Code Mode
+            else: 
                 self.create_new_issue("using_code_mode",message_service,message_info.getUrl(),[message_info])
                 
                 if oauth_parameters["code_challenge"] or oauth_parameters["code_challenge_method"] == False:
                     self.create_new_issue("code_mode_without_PKCE",message_service,message_info.getUrl(),[message_info])
-                
+
+
+            # Checks applicable to both Code and Implicit modes
             if not oauth_parameters["state"]:
                 print ("Response Type 'Implicit Grant' Detected without State Paremeter")
                 self.create_new_issue("implicit_mode_without_state",message_service,message_info.getUrl(),[message_info])
@@ -196,18 +201,20 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 self.create_new_issue("implicit_mode_without_nonce",message_service,message_info.getUrl(),[message_info])
             
             if oauth_parameters["redirect_uri"]:
+                latest_oauth_server["redirect_uri"]= oauth_parameters["redirect_uri"]
                 self.redirect_uri_checks(message_info)
             else:
+                latest_oauth_server["redirect_uri"]=None
                 start_new_thread(self.inject_redirect_uri, (message_info,False,))
                 
         elif response_type: 
             print("'response_type' " + response_type + "not recognized. Please contact support")
         
-        elif response_type is None:
+        elif not response_type:
             analyzed_parameters = analyzed_request.getParameters()
             global latest_oauth_server
-            if analyzed_parameters and latest_oauth_server:                
-                for response_type in oauth_urls_identified[latest_oauth_server]:
+            if analyzed_parameters and latest_oauth_server["server_url"]:                
+                for response_type in oauth_urls_identified[latest_oauth_server["server_url"]]:
                     if 'token' in response_type:  
                         for parameter in analyzed_parameters:   
                             if "token" in parameter.getName().lower() and parameter.getType()==IParameter.PARAM_URL: 
@@ -223,6 +230,9 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                     if contains_parameters(analyzed_parameters, ["state"]):
                         print("Tampering State parameter..")
                         self.state_parameter_checks(message_info)
+
+                # Reset this variable
+                latest_oauth_server=dict()
                                 
         return
     
@@ -459,15 +469,15 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
             for parameter in analyzed_parameters:
                 if 'state' in parameter.getName().lower():
-                    start_new_thread(self.state_parameter_checks, (message_info, parameter,))
                     start_new_thread(self.replay_state_parameter, (message_info, parameter,))
+                    start_new_thread(self.tamper_state_parameter, (message_info, parameter,))
                     start_new_thread(self.assess_state_parameter_entropy, (message_info, parameter,))
                     break
             return
 
     
     def assess_state_parameter_entropy(self, message_info, parameter):
-        # TODO
+        # TODO we'll need a library to measure entropy
         return
     
     
