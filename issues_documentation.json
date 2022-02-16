@@ -1,0 +1,184 @@
+{
+     "using_implicit_mode":{
+        "name":"Using OAuth Implicit Mode",
+        "issue_background":"TODO Issue Background",
+        "severity":"Medium",
+        "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    },
+    "using_code_mode":{
+        "name":"Using OAuth Authorization Code Mode",
+        "issue_background":"TODO Issue Background",
+        "severity":"Information",
+        "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    },
+    "code_mode_without_PKCE":{
+        "name":"Using OAuth Authorization Code Mode without PKCE",
+        "issue_background":"TODO Issue Background",
+        "severity":"Medium",
+        "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    },
+    "implicit_mode_without_state":{
+        "name":"Using OAuth Implicit Mode withouth State Parameter",
+        "issue_background":"TODO Issue Background",
+        "severity":"Medium",
+        "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    },
+    "implicit_mode_without_nonce":{
+        "name":"Using OAuth Implicit Mode without Nonce Parameter",
+        "issue_background":"TODO Issue Background",
+        "severity":"Medium",
+        "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    },
+    "access_code_as_URL_parameter":{
+        "name":"Passing Access Code as parameter in URL",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    },
+    "access_token_as_URL_parameter":{
+        "name":"Passing Access Token as parameter in URL",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    },
+    "tampered_state_parameter_allowed":{
+        "name":"Server accepts modified State parameter",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Tentative",
+        "remediation_detail":"TODO Remediation"
+    },
+    "replayed_state_parameter_allowed":{
+        "name":"Server accepts replayed State parameter",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Tentative",
+        "remediation_detail":"TODO Remediation"
+    },
+    "subdomain_allowed_in_redirect_uri":{
+        "name":"Server accepts redirect_uri subdomain",
+        "issue_background":"TODO Issue Background",
+        "severity":"Medium",
+        "confidence":"Tentative",
+        "remediation_detail":"TODO Remediation"
+    },
+    "directory_traversal_in_redirect_uri":{
+        "name":"Directory traversal in redirect_uri",
+        "issue_background":"TODO Issue Background",
+        "severity":"Medium",
+        "confidence":"Tentative",
+        "remediation_detail":"TODO Remediation"
+    },
+    "tampered_redirect_uri":{
+        "name":"Server accepts different redirect_uri - potential Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Tentative",
+        "remediation_detail":"TODO Remediation"
+    },
+    "tampered_redirect_uri_with_redirection":{
+        "name":"Server accepts different redirect_uri - Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    },
+    "top_level_domain_allowed_in_redirect_uri":{
+        "name":"Server accepts different redirect_uri - Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Tentative",
+        "remediation_detail":"TODO Remediation"
+    },
+    "injected_redirect_uri_allowed":{
+        "name":"Server accepts different redirect_uri - potential Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Tentative",
+        "remediation_detail":"TODO Remediation"
+    },
+    "injected_redirect_uri_allowed_with_redirection":{
+        "name":"Server accepts different redirect_uri - Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    },
+    "polluted_redirect_uri_allowed":{
+        "name":"Server accepts polluted redirect_uri parameter- potential Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Tentative",
+        "remediation_detail":"TODO Remediation"
+    },
+    "polluted_redirect_uri_allowed_with_redirection":{
+        "name":"Server accepts polluted redirect_uri parameter - Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    },
+    "tampered_redirect_uri_localhost":{
+        "name":"Server accepts different redirect_uri with localhost string - potential Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Tentative",
+        "remediation_detail":"TODO Remediation"
+    },
+    "tampered_redirect_uri_localhost_with_redirection":{
+        "name":"Server accepts different redirect_uri with localhost string - Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    },
+    "tamper_redirect_uri_parsing_discrepancies":{
+        "name":"Server accepts different redirect_uri with parsing discrepancies - potential Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Tentative",
+        "remediation_detail":"TODO Remediation"
+    },
+    "tamper_redirect_uri_parsing_discrepancies_with_redirection":{
+        "name":"Server accepts different redirect_uri with parsing discrepancies - Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    },
+    "tamper_redirect_uri_as_collab_path":{
+        "name":"Server accepts different redirect_uri as path in collaborator URL - potential Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Tentative",
+        "remediation_detail":"TODO Remediation"
+    },
+    "tamper_redirect_uri_as_collab_path_with_redirection":{
+        "name":"Server accepts different redirect_uri as path in collaborator URL - Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    },
+    "tamper_redirect_uri_with_redirect_to":{
+        "name":"Server accepts redirects_to parameter in redirect_uri - potential Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Tentative",
+        "remediation_detail":"TODO Remediation"
+    },
+    "tamper_redirect_uri_with_redirect_to_with_redirection":{
+        "name":"Server accepts redirects_to parameter in redirect_uri - Open Redirection",
+        "issue_background":"TODO Issue Background",
+        "severity":"High",
+        "confidence":"Certain",
+        "remediation_detail":"TODO Remediation"
+    }
+}
