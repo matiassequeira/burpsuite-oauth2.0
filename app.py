@@ -3,7 +3,6 @@
 
 from burp import IBurpExtender
 from burp import IHttpListener
-from burp import IProxyListener
 from burp import IScannerListener
 from burp import IExtensionStateListener
 from burp import IContextMenuFactory 
@@ -15,13 +14,20 @@ from java.util import ArrayList
 from javax.swing import JMenuItem
 
 import sys
+import json
+import random
+import string
+from thread import start_new_thread
 
+f = open('issues_documentation.json')
+issues_documentation = json.load(f)
 
 # response_type=code vs response_type=id_token or response_type=token . Guess it will change from host to host? We should therefore use a sort of heuristic?
 
 oauth_urls_identified=dict()
+latest_oauth_server=None
 
-class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListener, IExtensionStateListener, IContextMenuFactory):
+class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionStateListener, IContextMenuFactory):
     def registerExtenderCallbacks(self, callbacks):
         # keep a reference to our callbacks object
         self._callbacks = callbacks
@@ -36,9 +42,6 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
 
         # register ourselves as an HTTP listener
         self._callbacks.registerHttpListener(self)
-        
-        # register ourselves as a Proxy listener
-        self._callbacks.registerProxyListener(self)
 
         # register ourselves as a custom scanner check
         #Commented out because it errored on running
@@ -84,9 +87,9 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
 
 
     def processHttpMessage(self, toolFlag, messageIsRequest, messageInfo):
-        # Check if Message is a Response, and see what tool it came from. This is just helping with print formatting and tracking.
+        #  if you want the request before leaving Burp or if you want to capture the request after it gets a response. For that, you have the Boolean messageIsRequest—a setting of true will capture the request before leaving, and false will capture it with a response.
         #Check if Message is a Request and then check if it is coming from tool "Proxy".  If so, then analyze the request and go through thev parameters and see if any match known OAuth parameters. If so, Report.
-        if messageIsRequest:
+        if not messageIsRequest:
             if str(self._callbacks.getToolName(toolFlag)) == "Proxy":
                 #print("Proxy is receiving a Request")
                 analyzedRequest = self._helpers.analyzeRequest(messageInfo.getRequest())
@@ -95,16 +98,9 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
                 except:
                     print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
             else:
-                print("WARNING: got message from unidentified tool", str(self._callbacks.getToolName(toolFlag)))
-        
-        else:
-            responseInfo = self._helpers.analyzeResponse(messageInfo.getResponse())
-            responseReceived = self._helpers.bytesToString(messageInfo.getResponse()).encode('utf-8')
-            #print("responseInfo: ", responseInfo)
-            #print("responseReceived: ", responseReceived)
-            if str(self._callbacks.getToolName(toolFlag)) == "Extender":
-                print("Extensions Response has been Received")
-                
+                print("WARNING: got message from unidentified tool: " + str(self._callbacks.getToolName(toolFlag)))
+                print(self._helpers.bytesToString(messageInfo.getRequest()).encode('utf-8'))
+              
     def detect_oauth(self, message_info):
         analyzed_request= self._helpers.analyzeRequest(message_info.getRequest())
         message_service = message_info.getHttpService()
@@ -177,79 +173,22 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
         #Start Check if Implicit Mode by "Token" in response_type or Authorizaiton Code Mode by "code" in response_type
         if response_type and ("token" or "code" in response_type):
             if "token" in response_type:
-                issue=CustomScanIssue(   
-                                    message_service, 
-                                    message_info.getUrl(),
-                                    [message_info],
-                                    "Using OAuth Implicit Mode",
-                                    "TODO Detail",
-                                    "Medium",
-                                    "Certain",
-                                    "TODO Remediation"
-                                    )
-                print("New issue: " + issue.getIssueName())
-                self._callbacks.addScanIssue(issue)
+                self.create_new_issue("using_implicit_mode",message_service,message_info.getUrl(),[message_info])
+
             else: #"code" is in response_type indicating Authorization Code Mode
-                issue=CustomScanIssue(   
-                                    message_service, 
-                                    message_info.getUrl(),
-                                    [message_info],
-                                    "Using OAuth Authorization Code Mode",
-                                    "TODO Detail",
-                                    "Medium",
-                                    "Certain",
-                                    "TODO Remediation"
-                                    )
-                print("New issue: " + issue.getIssueName())
-                self._callbacks.addScanIssue(issue)
-                #check for PKCE Parameters in Auth Code Mode Request
+                self.create_new_issue("using_code_mode",message_service,message_info.getUrl(),[message_info])
+                
                 if oauth_parameters["code_challenge"] or oauth_parameters["code_challenge_method"] == False:
-                    issue=CustomScanIssue(   
-                                        message_service, 
-                                        message_info.getUrl(),
-                                        [message_info],
-                                        "Using OAuth Authorization Code Mode without PKCE",
-                                        "TODO Detail",
-                                        "Medium",
-                                        "Certain",
-                                        "TODO Remediation"
-                                        )
-                    print("New issue: " + issue.getIssueName())
-                    self._callbacks.addScanIssue(issue)
-                #end check for PKCE Parameters in Auth Code Mode Request
-            #Start Check if State Paremeter is present and report
+                    self.create_new_issue("code_mode_without_PKCE",message_service,message_info.getUrl(),[message_info])
+                
             if oauth_parameters["state"] == False:
-                print("No, Value: 'State'  does not exist in dictionary")
                 print ("Response Type 'Implicit Grant' Detected without State Paremeter")
-                issue=CustomScanIssue(   
-                                    message_service, 
-                                    message_info.getUrl(),
-                                    [message_info], 
-                                    "Using OAuth Implicit Mode withouth State Parameter",
-                                    "TODO Detail",
-                                    "Medium",
-                                    "Certain",
-                                    "TODO Remediation"
-                                    )
-                print("New issue: " + issue.getIssueName())
-                self._callbacks.addScanIssue(issue)
-                #End Check if Nonce Paremeter is present and report
+                self.create_new_issue("implicit_mode_without_state",message_service,message_info.getUrl(),[message_info])
+
                 if oauth_parameters["nonce"] == False:
                     print("No, Value: 'Nonce'  does not exist in dictionary")
                     print ("Response Type 'Implicit Grant' Detected without Nonce Paremeter")
-                    issue=CustomScanIssue(   
-                                    message_service, 
-                                    message_info.getUrl(),
-                                    [message_info], 
-                                    "Using OAuth Implicit Mode withouth Nonce Parameter",
-                                    "TODO Detail",
-                                    "Medium",
-                                    "Certain",
-                                    "TODO Remediation"
-                                    )
-                    print("New issue: " + issue.getIssueName())
-                    self._callbacks.addScanIssue(issue)
-                    #End Check if State Paremeter is present and report
+                    self.create_new_issue("implicit_mode_without_nonce",message_service,message_info.getUrl(),[message_info])
                 
         elif response_type: 
             print("'response_type' " + response_type + "not recognized. Please contact support")
@@ -262,47 +201,116 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IScannerListene
                     if 'token' in response_type:  
                         for parameter in analyzed_parameters:   
                             if "token" in parameter.getName().lower() and parameter.getType()==IParameter.PARAM_URL: 
-                                issue=CustomScanIssue(   
-                                    message_service, 
-                                    message_info.getUrl(),
-                                    [message_info], 
-                                    "Passing Access Token as parameter in URL",
-                                    "TODO Detail",
-                                    "Medium",
-                                    "Certain",
-                                    "TODO Remediation"
-                                    )
-                                print("New issue: " + issue.getIssueName())
-                                self._callbacks.addScanIssue(issue)
-
+                                self.create_new_issue("access_token_as_URL_parameter", message_service,message_info.getUrl(),[message_info])
+                                
                     elif 'code' in response_type:
                         for parameter in analyzed_parameters:
                             if "code" in parameter.getName().lower() and parameter.getType()==IParameter.PARAM_URL: 
-                                issue=CustomScanIssue(   
-                                    message_service, 
-                                    message_info.getUrl(),
-                                    [message_info], 
-                                    "Passing Access Code as parameter in URL",
-                                    "TODO Detail",
-                                    "Medium",
-                                    "Certain",
-                                    "TODO Remediation"
-                                    )
-                                print("New issue: " + issue.getIssueName())
-                                self._callbacks.addScanIssue(issue)
+                                self.create_new_issue("access_code_as_URL_parameter",message_service,message_info.getUrl(),[message_info])
+                
+                
+                if contains_parameters(analyzed_parameters, ["token", "code"]):
+                    if contains_parameters(analyzed_parameters, ["state"]):
+                        print("Tampering State parameter..")
+                        start_new_thread(self.tamper_state_parameter, (message_info,))
                                 
         return
+    
+    def create_new_issue(self, issue_id, message_service, url, message_info_list, details=None):
+        issue=CustomScanIssue(   
+                            issue_id,
+                            message_service, 
+                            url,
+                            message_info_list, 
+                            details
+                            )
+        print("New issue: " + issue.getIssueName())
+        self._callbacks.addScanIssue(issue)
+    
+
+
+    def tamper_state_parameter(self, message_info):
+        try:
+            analyzed_request= self._helpers.analyzeRequest(message_info.getRequest())
+            analyzed_parameters = analyzed_request.getParameters()
+
+            for parameter in analyzed_parameters:
+                if 'state' in parameter.getName().lower():
+                    param_value= parameter.getValue()
+                    new_param_value= changeChar(param_value, random.randrange(1,len(param_value)))
+
+                    new_request= self._helpers.updateParameter(message_info.getRequest(), self._helpers.buildParameter(
+                        parameter.getName(),
+                        new_param_value,
+                        parameter.getType()
+                    ))
+
+                    modified_message_info= self._callbacks.makeHttpRequest(message_info.getHttpService(), new_request)
+                    response_variations= self._helpers.analyzeResponseVariations([message_info.getResponse(), modified_message_info.getResponse()])
+                    variant_attributes= response_variations.getVariantAttributes()
+                    details=''
+                    for variant in variant_attributes:
+                        details=details+"Variation: "+variant
+                        details=details+" Original response: "+str(response_variations.getAttributeValue(variant, 0))
+                        details=details+" Modified response: "+str(response_variations.getAttributeValue(variant, 1))+"\n"
+                    
+                    original_response_status_code= self._helpers.analyzeResponse(message_info.getResponse()).getStatusCode()
+                    modified_response_status_code= self._helpers.analyzeResponse(modified_message_info.getResponse()).getStatusCode()
+                    
+                    if original_response_status_code == modified_response_status_code:
+                        self.create_new_issue("tampered_state_parameter_allowed",message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], details)
+
+                    break
+
+            return
+        except:
+            print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
+
+def contains_parameters(analyzed_parameters_list, lookup_param_list):
+    for parameter in analyzed_parameters_list:
+        for matching_param in lookup_param_list:
+            if matching_param in parameter.getName().lower():
+                return matching_param
+
+def changeChar(buf, pos):
+    chars= string.ascii_uppercase + string.digits + string.ascii_lowercase
+    val= random.choice(chars)
+    print("Replacing char offset=%d, old value=%r, new=%r"%(pos-1, buf[pos-1], val))
+    print("Old buf: "+buf)
+    buf = buf[:pos-1] + str(val)  + buf[pos:]
+    print("New buf: "+buf)
+    return buf
+
+# def repeatByte(buf, pos, cant):
+#     print("Repeating byte offset=%d, value=%r, cant=%i"%(pos-1, buf[pos-1], cant))
+#     buf = buf[:pos-1] + buf[pos-1]*cant + buf[pos:]
+#     return buf
+
+# def insertRandomData(buf, pos, cant): 
+
+#     randomString = ""
+#     for _ in itertools.repeat(None, cant):
+#         randomString+=chr(random.randrange(0,256))
+#     print("Inserted after byte offset=0x%d random data %s"%(pos-1, randomString))
+
+#     buf = buf[:pos-1] + buf[pos-1] + bytes(randomString, encoding='utf-8') + buf[pos:]
+
+#     return buf
 
 class CustomScanIssue(IScanIssue):
-    def __init__(self, httpService, url, httpMessages, name, detail, severity, confidence, remediation_detail):
+    def __init__(self, issue_id, httpService, url, httpMessages, detail=None):
         self._httpService = httpService
         self._url = url
         self._httpMessages = httpMessages
-        self._name = name
-        self._detail = detail
-        self._severity = severity
-        self._confidence= confidence
-        self._remediation_detail= remediation_detail
+        
+        global issues_documentation
+        issue_documentation=issues_documentation[issue_id]
+        self._name = issue_documentation["name"]
+        self._issue_background = issue_documentation["issue_background"]
+        self._severity = issue_documentation["severity"]
+        self._confidence= issue_documentation["confidence"]
+        self._remediation_detail= issue_documentation["remediation_detail"]
+        self._detail=detail
 
     def getUrl(self):
         return self._url
@@ -320,13 +328,16 @@ class CustomScanIssue(IScanIssue):
         return self._confidence
 
     def getIssueBackground(self):
-        pass
+        return self._issue_background
 
     def getRemediationBackground(self):
         pass
 
     def getIssueDetail(self):
-        return self._detail
+        if self._detail:
+            return self._detail
+        else:
+            pass
 
     def getRemediationDetail(self):
         return self._remediation_detail
