@@ -13,14 +13,16 @@ from java.io import PrintWriter
 from java.util import ArrayList
 from javax.swing import JMenuItem
 
+from thread import start_new_thread
+
 import sys
 import json
 import random
 import string
-from thread import start_new_thread
 from urlparse import urlparse
 import time
 import urllib
+
 
 f = open('issues_documentation.json')
 issues_documentation = json.load(f)
@@ -168,6 +170,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 self.start_security_checks(message_info, analyzed_request, analyzed_parameters, oauth_parameters)
 
     def start_security_checks(self, message_info, analyzed_request, analyzed_parameters, oauth_parameters):
+        global latest_oauth_server
         message_service = message_info.getHttpService()
         response_type= oauth_parameters["response_type"]
 
@@ -176,7 +179,9 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
         if response_type and ("token" or "code" in response_type):
 
             # Store some information that will be used to analyze the callback (redirect) request
-            latest_oauth_server['server_url']=str(message_service)
+            latest_oauth_server=dict()
+            latest_oauth_server['server_url']= str(message_service)
+            latest_oauth_server['response_type']= oauth_parameters["response_type"]
             
             
             # Perform checks according to response_type - Implicit (token) or Code modes
@@ -201,7 +206,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 self.create_new_issue("implicit_mode_without_nonce",message_service,message_info.getUrl(),[message_info])
             
             if oauth_parameters["redirect_uri"]:
-                latest_oauth_server["redirect_uri"]= oauth_parameters["redirect_uri"]
+                latest_oauth_server["redirect_uri"]= str(self._helpers.urlDecode(oauth_parameters["redirect_uri"]))
                 self.redirect_uri_checks(message_info)
             else:
                 latest_oauth_server["redirect_uri"]=None
@@ -210,31 +215,45 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
         elif response_type: 
             print("'response_type' " + response_type + "not recognized. Please contact support")
         
-        elif not response_type:
-            analyzed_parameters = analyzed_request.getParameters()
-            global latest_oauth_server
-            if analyzed_parameters and latest_oauth_server["server_url"]:                
-                for response_type in oauth_urls_identified[latest_oauth_server["server_url"]]:
-                    if 'token' in response_type:  
-                        for parameter in analyzed_parameters:   
-                            if "token" in parameter.getName().lower() and parameter.getType()==IParameter.PARAM_URL: 
-                                self.create_new_issue("access_token_as_URL_parameter", message_service,message_info.getUrl(),[message_info])
-                                
-                    elif 'code' in response_type:
-                        for parameter in analyzed_parameters:
-                            if "code" in parameter.getName().lower() and parameter.getType()==IParameter.PARAM_URL: 
-                                self.create_new_issue("access_code_as_URL_parameter",message_service,message_info.getUrl(),[message_info])
-                
-                
-                if contains_parameters(analyzed_parameters, ["token", "code"]):
-                    if contains_parameters(analyzed_parameters, ["state"]):
-                        print("Tampering State parameter..")
-                        self.state_parameter_checks(message_info)
+        elif not response_type and len(latest_oauth_server)>0:  
+            if latest_oauth_server['redirect_uri'] and self.urls_match(latest_oauth_server['redirect_uri'], message_info):
+            
+                for parameter in analyzed_parameters:   
+                    if parameter.getType()==IParameter.PARAM_URL:
+                        if 'token' in latest_oauth_server['response_type'] and "token" in parameter.getName().lower(): 
+                            self.create_new_issue("access_token_as_URL_parameter", message_service,message_info.getUrl(),[message_info])
+                        elif 'code' in latest_oauth_server['response_type'] and "code" in parameter.getName().lower():
+                            self.create_new_issue("access_code_as_URL_parameter",message_service,message_info.getUrl(),[message_info])
+            
+                self.state_parameter_checks(message_info)
 
-                # Reset this variable
+                # It is safe to reset this variable
                 latest_oauth_server=dict()
-                                
+
+            elif not latest_oauth_server['redirect_uri']: #No redirect_uri, will use tighter comparisons then
+                # TODO Since we do not have the redirect_uri these checks are less certain. Will do sth about it?
+                for parameter in analyzed_parameters:
+                    if latest_oauth_server['response_type'] == parameter.getName().lower() and parameter.getType()==IParameter.PARAM_URL: 
+                        if 'token' in latest_oauth_server['response_type']:
+                            self.create_new_issue("access_token_as_URL_parameter", message_service,message_info.getUrl(),[message_info])
+                        elif 'code' in latest_oauth_server['response_type']:    
+                            self.create_new_issue("access_code_as_URL_parameter",message_service,message_info.getUrl(),[message_info])
+            
+                        self.state_parameter_checks(message_info)
         return
+    
+    def urls_match(self, url, message_info):
+        parsed_request_url= urlparse(str(message_info.getUrl()))
+        parsed_url=urlparse(url)
+        
+        parsed_request_url= parsed_request_url._replace(netloc= parsed_request_url.netloc.split(':')[0] )
+        parsed_url= parsed_url._replace(netloc= parsed_url.netloc.split(':')[0] )
+        
+        same_host=parsed_request_url.netloc==parsed_url.netloc
+        same_path=parsed_request_url.path==parsed_url.path
+        same_scheme=parsed_request_url.scheme==parsed_url.scheme
+        return same_host and same_path and same_scheme
+
     
     def create_new_issue(self, issue_id, message_service, url, message_info_list, details=None):
         issue=CustomScanIssue(   
@@ -254,6 +273,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
         for parameter in analyzed_parameters:
             if 'redirect' in parameter.getName().lower():
+                print("Tampering redirect_uri parameter..")
                 start_new_thread(self.tamper_redirect_uri_with_subdomain, (message_info, parameter,))
                 start_new_thread(self.tamper_redirect_uri_with_path_traversal, (message_info, parameter,))
                 start_new_thread(self.tamper_redirect_uri_with_collab_domain, (message_info, parameter,))
@@ -469,6 +489,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
             for parameter in analyzed_parameters:
                 if 'state' in parameter.getName().lower():
+                    print("Tampering state parameter..")
                     start_new_thread(self.replay_state_parameter, (message_info, parameter,))
                     start_new_thread(self.tamper_state_parameter, (message_info, parameter,))
                     start_new_thread(self.assess_state_parameter_entropy, (message_info, parameter,))
@@ -531,13 +552,6 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
         return first_response_status_code==second_response_status_code
 
 
-def contains_parameters(analyzed_parameters_list, lookup_param_list):
-    for parameter in analyzed_parameters_list:
-        for matching_param in lookup_param_list:
-            if matching_param in parameter.getName().lower():
-                return matching_param
-
-
 def changeChar(buf, pos):
     chars= string.ascii_uppercase + string.digits + string.ascii_lowercase
     val= random.choice(chars)
@@ -546,6 +560,7 @@ def changeChar(buf, pos):
     buf = buf[:pos-1] + str(val)  + buf[pos:]
     print("New buf: "+buf)
     return buf
+
 
 def get_collabs_interactions_summary(collab_interactions):
     details=''
