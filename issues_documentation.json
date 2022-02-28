@@ -1,10 +1,10 @@
 {
      "using_implicit_mode":{
         "name":"Using OAuth Implicit Mode",
-        "issue_background":"TODO Issue Background",
+        "issue_background":"The implicit grant (response type \"token\") and other response types causing the authorization server to issue access tokens in the authorization response are vulnerable to access token leakage and access token replay.",
         "severity":"Medium",
         "confidence":"Certain",
-        "remediation_detail":"TODO Remediation"
+        "remediation_detail":"Clients SHOULD instead use the response type \"code\" (aka authorization code grant type) or any other response type that causes the authorization server to issue access tokens in the token response, such as the \"code id_token\" response type. This allows the authorization server to detect replay attempts by attackers and generally reduces the attack surface since access tokens are not exposed in URLs."
     },
     "using_code_mode":{
         "name":"Using OAuth Authorization Code Mode",
@@ -14,171 +14,192 @@
         "remediation_detail":"TODO Remediation"
     },
     "code_mode_without_PKCE":{
-        "name":"Using OAuth Authorization Code Mode without PKCE",
-        "issue_background":"TODO Issue Background",
+        "name":"Using OAuth Authorization Code Mode Without PKCE",
+        "issue_background":"PKCE is not implemented in the OAuth dance. The PKCE-enhanced Authorization Code Flow introduces a secret created by the calling application that can be verified by the authorization server; this secret is called the Code Verifier. Additionally, the calling app creates a transform value of the Code Verifier called the Code Challenge and sends this value over HTTPS to retrieve an Authorization Code. This way, a malicious attacker that intercepts the Authorization Code cannot exchange it for a token without the Code Verifier.",
         "severity":"Medium",
         "confidence":"Certain",
-        "remediation_detail":"TODO Remediation"
+        "remediation_detail":"Implement the PKCE security feature for the OAuth process."
     },
-    "implicit_mode_without_state":{
-        "name":"Using OAuth Implicit Mode withouth State Parameter",
-        "issue_background":"TODO Issue Background",
+    "auth_code_replayed":{
+        "name":"Replayed Authorization Code Accepted by Resource Server",
+        "issue_background":"Authorization codes may be unintentionally leaked to untrusted web sites or attackers in different ways (referrer headers, request logs, open redirectors, browser history, etc). Therefore, authorization codes should not be allowed to be reused.",
         "severity":"Medium",
         "confidence":"Certain",
-        "remediation_detail":"TODO Remediation"
+        "remediation_detail":"Resource servers MUST prevent injection (replay) of authorization codes into the authorization response by attackers.   The use of PKCE is RECOMMENDED to this end.  The OpenID Connect \"nonce\" parameter and ID Token Claim [OpenID] MAY be used as well.  The PKCE challenge or OpenID Connect \"nonce\" MUST be transaction-specific and securely bound to the client and the user agent in which the transaction was started. Also, if possible, verify that the Authorization Code has not been previously used."
+    },
+    "no_state_parameter":{
+        "name":"Using OAuth Withouth State Parameter",
+        "issue_background":"Lack of the \"state\" parameter makes the client vulnerable to CSRF attacks - i.e. an attacker trying to access to the victim's account by tricking the user into clicking on a link to the Authorization Server at a time when the user is already authenticated. Another example is an attacker tricking the victim to use the attacker's account by injecting its Authorization Code or Access Token.",
+        "severity":"High",
+        "confidence":"Certain",
+        "remediation_detail":"Make sure the client implements the \"state\" parameter. It is an opaque value used by the client to maintain state between the request and callback. The authorization server includes this value when redirecting the user-agent back to the client. The parameter SHOULD be used for preventing cross-site request forgery."
+    },
+    "no_state_parameter_code_flow_with_PKCE":{
+        "inherit_from":"no_state_parameter",
+        "name":"Using PKCE-enhanced Authorization Code Flow Withouth State Parameter",
+        "issue_background":"Lack of the \"state\" parameter makes the client vulnerable to CSRF attacks. However, a potential CRSF attack would be mitigated by the PKCE mechanism implemented on the server.",
+        "severity":"Information"
     },
     "implicit_mode_without_nonce":{
-        "name":"Using OAuth Implicit Mode without Nonce Parameter",
+        "name":"Using OAuth Without Nonce Parameter",
         "issue_background":"TODO Issue Background",
         "severity":"Medium",
         "confidence":"Certain",
         "remediation_detail":"TODO Remediation"
     },
-    "access_code_as_URL_parameter":{
-        "name":"Passing Access Code as parameter in URL",
-        "issue_background":"TODO Issue Background",
+    "authorization_code_as_URL_parameter":{
+        "name":"Passing Authorization Code as Parameter in URL",
+        "issue_background":"When a browser navigates to \"client.example/redirection_endpoint?code=abcd\" or \"client.example/redirection_endpoint?id_token=abcd\" as a result of a redirect from a provider's authorization endpoint, the URL including the Authorization Code or Access Token may end up in the browser's history.  An attacker with access to the device could obtain the code and try to replay it.",
         "severity":"High",
         "confidence":"Certain",
-        "remediation_detail":"TODO Remediation"
+        "remediation_detail":"Implement Authorization Code replay prevention and use form post response mode instead of redirect for the authorization response"
     },
     "access_token_as_URL_parameter":{
+        "inherit_from":"authorization_code_as_URL_parameter",
         "name":"Passing Access Token as parameter in URL",
-        "issue_background":"TODO Issue Background",
-        "severity":"High",
-        "confidence":"Certain",
-        "remediation_detail":"TODO Remediation"
+        "remediation_detail":"Clients MUST NOT pass access tokens in a URI query parameter. The Authorization Code grant or alternative OAuth response modes like the form post response mode [oauth-v2-form-post-response-mode] can be used to this end."
     },
     "tampered_state_parameter_allowed":{
-        "name":"Server accepts modified State parameter",
-        "issue_background":"TODO Issue Background",
+        "name":"Server accepts modified State Parameter",
+        "issue_background":"Not validating the \"state\" parameter makes the client vulnerable to CSRF attacks - i.e. an attacker trying to access to the victim's account by tricking the user into clicking on a link to the Authorization Server at a time when the user is already authenticated. Another example is an attacker tricking the victim to use the attacker's account by injecting its Authorization Code or Access Token.",
         "severity":"High",
         "confidence":"Tentative",
-        "remediation_detail":"TODO Remediation"
+        "remediation_detail":"Verify that the \"state\" parameter value included in the request value matches the one included in the callback URL."
     },
     "replayed_state_parameter_allowed":{
-        "name":"Server accepts replayed State parameter",
-        "issue_background":"TODO Issue Background",
-        "severity":"High",
-        "confidence":"Tentative",
-        "remediation_detail":"TODO Remediation"
+        "inherit_from":"tampered_state_parameter_allowed",
+        "name":"Server Accepts Replayed State Parameter",
+        "remediation_detail":"Do not allow re-using the \"state\" parameter to avoid replay attacks. The \"state\" value SHOULD be invalidated by the client after its first use at the redirection endpoint.  If this is implemented, and an attacker receives a token through the Referer header from the client's web site, the \"state\" was already used, invalidated by the client and cannot be used again by the attacker."
+
     },
     "subdomain_allowed_in_redirect_uri":{
-        "name":"Server accepts redirect_uri subdomain",
-        "issue_background":"TODO Issue Background",
+        "name":"Server Accepts Subdomain in \"redirect_uri\" Parameter",
+        "issue_background":"If subdomains are accepted in the \"redirect_uri\" parameter, an attacker would be able to steal the victim's Access Token or Authorization Code by redirecting the victim to a subdomain containing an XSS vulnerability or a compromised subdomain as a result of a subdomain takeover.",
         "severity":"Medium",
         "confidence":"Tentative",
-        "remediation_detail":"TODO Remediation"
+        "remediation_detail":"It is advised to configure the redirect logic by using exact redirect URI matching only.  This means the  authorization server MUST compare the two URIs using simple string comparison. Also, servers on which callbacks are hosted MUST NOT expose open redirectors and clients SHOULD use the authorization code response type instead of response types causing access token issuance at the authorization endpoint"
     },
     "directory_traversal_in_redirect_uri":{
-        "name":"Directory traversal in redirect_uri",
-        "issue_background":"TODO Issue Background",
+        "inherit_from":"subdomain_allowed_in_redirect_uri",
+        "name":"Directory Traversal in \"redirect_uri\" Parameter",
+        "issue_background":"If different endpoints in the server are accepted in the \"redirect_uri\" parameter, an attacker would be able to steal the victim's Access Token or Authorization Code by redirecting the victim to an endpoint containing an XSS vulnerability.",
         "severity":"Medium",
-        "confidence":"Tentative",
-        "remediation_detail":"TODO Remediation"
+        "confidence":"Tentative"
     },
     "tampered_redirect_uri":{
-        "name":"Server accepts different redirect_uri - potential Open Redirection",
-        "issue_background":"TODO Issue Background",
+        "inherit_from":"subdomain_allowed_in_redirect_uri",
+        "name":"Server Accepts Different \"redirect_uri\" Parameter - Potential Open Redirection",
+        "issue_background":"Insufficient validation of the redirect URI effectively breaks client identification or authentication (depending on grant and client type) and allows the attacker to obtain an authorization code or access token, either by directly sending the user agent to a URI under the attackers control, or by exposing the OAuth credentials to an attacker by utilizing an open redirector at the client in conjunction with the way user agents handle URL fragments.",
         "severity":"High",
-        "confidence":"Tentative",
-        "remediation_detail":"TODO Remediation"
+        "confidence":"Tentative"
     },
     "tampered_redirect_uri_with_redirection":{
-        "name":"Server accepts different redirect_uri - Open Redirection",
-        "issue_background":"TODO Issue Background",
+        "inherit_from":"tampered_redirect_uri",
+        "name":"Server Accepts Different \"redirect_uri\" Parameter - Open Redirection",
         "severity":"High",
-        "confidence":"Certain",
-        "remediation_detail":"TODO Remediation"
+        "confidence":"Certain"
     },
-    "top_level_domain_allowed_in_redirect_uri":{
-        "name":"Server accepts different redirect_uri - Open Redirection",
-        "issue_background":"TODO Issue Background",
-        "severity":"High",
-        "confidence":"Tentative",
-        "remediation_detail":"TODO Remediation"
+    "domain_allowed_in_redirect_uri":{
+        "inherit_from":"directory_traversal_in_redirect_uri",
+        "name":"Server Accepts Homepage Domain in \"redirect_uri\" Parameter",
+        "severity":"Medium",
+        "confidence":"Tentative"
     },
     "injected_redirect_uri_allowed":{
-        "name":"Server accepts different redirect_uri - potential Open Redirection",
-        "issue_background":"TODO Issue Background",
+        "name":"Server Accepts Injected \"redirect_uri\" Parameter - Potential Open Redirection",
+        "issue_background":"The OAuth server accepted a \"redirect_uri\" parameter injected by this extension, which was  not specified by the client (since probably the server is already aware of the redirect URI). Accepting an untrusted, client-provided redirect URI effectively breaks client identification or authentication (depending on grant and client type) and allows the attacker to obtain an authorization code or access token, either by directly sending the user agent to a URI under the attackers control, or by exposing the OAuth credentials to an attacker by utilizing an open redirector at the client in conjunction with the way user agents handle URL fragments.",
         "severity":"High",
         "confidence":"Tentative",
-        "remediation_detail":"TODO Remediation"
+        "remediation_detail":"If the \"redirect_uri\" parameter is already predetermined in the server, do not accept any client-provided redirect URI"
     },
     "injected_redirect_uri_allowed_with_redirection":{
-        "name":"Server accepts different redirect_uri - Open Redirection",
-        "issue_background":"TODO Issue Background",
+        "inherit_from":"injected_redirect_uri_allowed",
+        "name":"Server Accepts Injected \"redirect_uri\" Parameter - Open Redirection",
         "severity":"High",
-        "confidence":"Certain",
-        "remediation_detail":"TODO Remediation"
+        "confidence":"Certain"
     },
     "polluted_redirect_uri_allowed":{
-        "name":"Server accepts polluted redirect_uri parameter- potential Open Redirection",
-        "issue_background":"TODO Issue Background",
+        "name":"Server Accepts Duplicated (Polluted) \"redirect_uri\" Parameter - Potential Open Redirection",
+        "issue_background":"The OAuth server accepted a duplicated \"redirect_uri\" parameter, injected by this extension. Incorrect parsing of the redirect URI parameter effectively breaks client identification or authentication (depending on grant and client type) and allows the attacker to obtain an authorization code or access token, either by directly sending the user agent to a URI under the attackers control, or by exposing the OAuth credentials to an attacker by utilizing an open redirector at the client in conjunction with the way user agents handle URL fragments.",
         "severity":"High",
         "confidence":"Tentative",
-        "remediation_detail":"TODO Remediation"
+        "remediation_detail":"Verify the parameters parsing mechanism in the server to avoid processing and accepting a polluted parameter."
     },
     "polluted_redirect_uri_allowed_with_redirection":{
-        "name":"Server accepts polluted redirect_uri parameter - Open Redirection",
-        "issue_background":"TODO Issue Background",
+        "inherit_from":"polluted_redirect_uri_allowed",
+        "name":"Server Accepts Duplicated (Polluted) \"redirect_uri\" Parameter - Open Redirection",
         "severity":"High",
-        "confidence":"Certain",
-        "remediation_detail":"TODO Remediation"
+        "confidence":"Certain"
     },
     "tampered_redirect_uri_localhost":{
-        "name":"Server accepts different redirect_uri with localhost string - potential Open Redirection",
-        "issue_background":"TODO Issue Background",
+        "name":"Server Accepts \"redirect_uri\" Parameter Containing \"localhost\" String - Potential Open Redirection",
+        "issue_background":"The OAuth server accepted a \"redirect_uri\" parameter containing the \"localhost\" string. Some servers give special treatment to localhost URIs as they're often used during development. In some cases, any redirect URI beginning with localhost may be accidentally permitted in the production environment. Insufficient validation of the redirect URI effectively breaks client identification or authentication (depending on grant and client type) and allows the attacker to obtain an authorization code or access token, either by directly sending the user agent to a URI under the attackers control, or by exposing the OAuth credentials to an attacker by utilizing an open redirector at the client in conjunction with the way user agents handle URL fragments.",
         "severity":"High",
         "confidence":"Tentative",
-        "remediation_detail":"TODO Remediation"
+        "remediation_detail":"OAuth servers should not give a privileged treatment to URIs containing the \"localhost\" string, as they can be easily tricked."
     },
     "tampered_redirect_uri_localhost_with_redirection":{
-        "name":"Server accepts different redirect_uri with localhost string - Open Redirection",
-        "issue_background":"TODO Issue Background",
+        "inherit_from":"tampered_redirect_uri_localhost",
+        "name":"Server Accepts \"redirect_uri\" Parameter Containing \"localhost\" String - Open Redirection",
         "severity":"High",
-        "confidence":"Certain",
-        "remediation_detail":"TODO Remediation"
+        "confidence":"Certain"
     },
     "tamper_redirect_uri_parsing_discrepancies":{
-        "name":"Server accepts different redirect_uri with parsing discrepancies - potential Open Redirection",
-        "issue_background":"TODO Issue Background",
+        "name":"Parsing Discrepancies For \"redirect_uri\" Parameter - Potential Open Redirection",
+        "issue_background":"The OAuth server accepted a \"redirect_uri\" parameter containing different payload injections meant to exploit parsing discrepancies or the redirect URI by the different components of the OAuth service. Insufficient validation of the redirect URI effectively breaks client identification or authentication (depending on grant and client type) and allows the attacker to obtain an authorization code or access token, either by directly sending the user agent to a URI under the attackers control, or by exposing the OAuth credentials to an attacker by utilizing an open redirector at the client in conjunction with the way user agents handle URL fragments.",
         "severity":"High",
         "confidence":"Tentative",
-        "remediation_detail":"TODO Remediation"
+        "remediation_detail":"Ensure that the \"redirect_uri\" parameter gets parsed in a uniform way by the different components of the OAuth service."
     },
     "tamper_redirect_uri_parsing_discrepancies_with_redirection":{
-        "name":"Server accepts different redirect_uri with parsing discrepancies - Open Redirection",
-        "issue_background":"TODO Issue Background",
+        "inherit_from":"tamper_redirect_uri_parsing_discrepancies",
+        "name":"Parsing Discrepancies For \"redirect_uri\" Parameter - Potential Open Redirection",
         "severity":"High",
-        "confidence":"Certain",
-        "remediation_detail":"TODO Remediation"
+        "confidence":"Certain"
     },
     "tamper_redirect_uri_as_collab_path":{
-        "name":"Server accepts different redirect_uri as path in collaborator URL - potential Open Redirection",
-        "issue_background":"TODO Issue Background",
+        "name":"Server Accepts Legitimate \"redirect_uri\" as Path in Malicious Redirect URI - Potential Open Redirection",
+        "issue_background":"The OAuth server accepted a \"redirect_uri\" parameter in the form of https://malicious_URI/legitimate_uri. This would make the OAuth server to interpret the legitimate redirect URI as a path of the malicious URI injected by this extension. Insufficient validation of the redirect URI effectively breaks client identification or authentication (depending on grant and client type) and allows the attacker to obtain an authorization code or access token, either by directly sending the user agent to a URI under the attackers control, or by exposing the OAuth credentials to an attacker by utilizing an open redirector at the client in conjunction with the way user agents handle URL fragments.",
         "severity":"High",
         "confidence":"Tentative",
-        "remediation_detail":"TODO Remediation"
+        "remediation_detail":"Enforce proper validation and parsing of the redirect URI parameter."
     },
     "tamper_redirect_uri_as_collab_path_with_redirection":{
-        "name":"Server accepts different redirect_uri as path in collaborator URL - Open Redirection",
-        "issue_background":"TODO Issue Background",
+        "inherit_from":"tamper_redirect_uri_as_collab_path",
+        "name":"Server Accepts Legitimate \"redirect_uri\" as Path in Malicious Redirect URI - Open Redirection",
         "severity":"High",
-        "confidence":"Certain",
-        "remediation_detail":"TODO Remediation"
+        "confidence":"Certain"
     },
     "tamper_redirect_uri_with_redirect_to":{
-        "name":"Server accepts redirects_to parameter in redirect_uri - potential Open Redirection",
-        "issue_background":"TODO Issue Background",
+        "name":"Server Accepts Injected \"redirects_to\" Directive in \"redirect_uri\" Parameter - Potential Open Redirection",
+        "issue_background":"The OAuth server accepted a \"redirect_uri\" parameter containing a \"redirects_to\" directive. This would make the OAuth server to accept the \"redirect_uri\" parameter (since it's the legitimate one) and parse the \"redirects_to\" parameter causing a redirection to a malicious host. Insufficient validation of the redirect URI effectively breaks client identification or authentication (depending on grant and client type) and allows the attacker to obtain an authorization code or access token, either by directly sending the user agent to a URI under the attackers control, or by exposing the OAuth credentials to an attacker by utilizing an open redirector at the client in conjunction with the way user agents handle URL fragments.",
         "severity":"High",
         "confidence":"Tentative",
-        "remediation_detail":"TODO Remediation"
+        "remediation_detail":"Verify that no parameters are injected within the \"redirect_uri\" parameter. Enforce proper validation and parsing of the redirect URI parameter."
     },
     "tamper_redirect_uri_with_redirect_to_with_redirection":{
-        "name":"Server accepts redirects_to parameter in redirect_uri - Open Redirection",
-        "issue_background":"TODO Issue Background",
+        "inherit_from":"tamper_redirect_uri_with_redirect_to",
+        "name":"Server Accepts Injected \"redirects_to\" Directive in \"redirect_uri\" Parameter - Open Redirection",
         "severity":"High",
-        "confidence":"Certain",
-        "remediation_detail":"TODO Remediation"
+        "confidence":"Certain"
+    },
+    "oauth_server_allows_implicit_auth_id_token":{
+        "inherit_from":"using_implicit_mode",
+        "name":"Server Allows Implicit OAuth Flow (\"response_type\"=id_token)",
+        "severity":"High",
+        "confidence":"Tentative"
+    },
+    "oauth_server_allows_implicit_auth_token":{
+        "inherit_from":"using_implicit_mode",
+        "name":"Server Allows Implicit OAuth Flow (\"response_type\"=token)",
+        "severity":"High",
+        "confidence":"Tentative"
+    },
+    "tamper_redirect_uri_plaintext":{
+        "name":"Server Allows Non-Encrypted Channel For \"redirect_uri\" Parameter",
+        "issue_background":"The use of a plaintext redirect URI is allowed by the OAuth server. An attacker in the same network of a victim might harness this issue to steal the victim's Access Token or Authorization Code by sniffing network packets.",
+        "severity":"High",
+        "confidence":"Tentative",
+        "remediation_detail":"Enforce the use of encrypted channels (HTTPS) for the redirect URI."
     }
 }
