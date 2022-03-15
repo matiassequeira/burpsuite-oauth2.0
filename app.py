@@ -22,21 +22,28 @@ import string
 from urlparse import urlparse
 import time
 import urllib
+import threading
+import os
 
 
 f = open('issues_documentation.json')
 issues_documentation = json.load(f)
 
-# response_type=code vs response_type=id_token or response_type=token . Guess it will change from host to host? We should therefore use a sort of heuristic?
-
 oauth_urls_identified=dict()
 latest_oauth_server=dict()
+
+my_mutex = threading.Lock()
 
 class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionStateListener, IContextMenuFactory):
     def registerExtenderCallbacks(self, callbacks):
         # keep a reference to our callbacks object
         self._callbacks = callbacks
         self._callbacks.setExtensionName("OAuth2.0 Extender")
+        
+        self._is_community_edition= False
+        if 'community' in str(self._callbacks.getBurpVersion()).lower():
+            print("Using Burp Community Edition. Will not use Burp Collaborator payloads")
+            self._is_community_edition= True
         
         # obtain our output and error streams
         stdout = PrintWriter(callbacks.getStdout(), True)
@@ -135,41 +142,44 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                         #print "FOUND AN OAUTH PARAMETER", oauth_parameter
                         oauth_parameters[oauth_parameter] = parameter.getValue().lower()
                         
-            if oauth_parameters["client_id"] and oauth_parameters["response_type"]:
-                oauth_identified = True
-                print("HTTP service: " + str(message_service)) #Delete this print
-                if str(message_service) not in oauth_urls_identified:
-                    oauth_urls_identified[str(message_service)]=[ oauth_parameters["response_type"] ]
-                    print("------   New OAuth Identified   ------")
+            # Count how many OAuth params we have
+            param_count=0
+            for oauth_param in oauth_parameters:
+                if oauth_parameters[oauth_param]:
+                    param_count+=1
+            
+            if oauth_parameters["client_id"]:
+                if oauth_parameters["response_type"]:
+                    message_info.setHighlight("blue")
+                    message_info.setComment("OAuth 2.0 Authorization Request")
+                    print("------  OAuth Identified   ------")
                     print("URL observed was : " + str(message_info.getUrl()))
                     print(" Parameters observed in the request indicating OAuth presence were:")
                     for item, value in oauth_parameters.items():
-                        if value == True:
-                            print("     > " + item)
-                    print("-- Authorization Type Detected as : " + oauth_parameters['response_type'] + " --")               
+                        if value:
+                            print(item+": "+value)
+                    print("-- Authorization Type Detected: " + oauth_parameters['response_type'] + " --")               
+                    self.start_security_checks(message_info, analyzed_parameters, oauth_parameters )
 
-                    self.start_security_checks(message_info, analyzed_request, analyzed_parameters, oauth_parameters )
-
-                    
-                elif oauth_parameters["response_type"] not in oauth_urls_identified[str(message_service)]:
-                    oauth_urls_identified[str(message_service)].append( oauth_parameters["response_type"] )
-                    print("------   Existing OAuth With Different Flow Identified   ------")
+                # No response_type. Check if we have an acceptable amount of parameters 
+                elif param_count>=3:
+                    message_info.setHighlight("blue")
+                    message_info.setComment("OAuth 2.0 Authorization Request")
+                    print("------  OAuth Identified   ------")
                     print("URL observed was : " + str(message_info.getUrl()))
                     print(" Parameters observed in the request indicating OAuth presence were:")
                     for item, value in oauth_parameters.items():
-                        if value == True:
-                            print("     > " + item)
-                    print("-- Authorization Type Detected as : " + oauth_parameters["response_type"] + " --")
-
-                    self.start_security_checks(message_info, analyzed_request, analyzed_parameters, oauth_parameters )
-                
-                else:
-                    print("Existing OAuth Url Observed: " + str(message_service) + " (" + str(message_info.getUrl()) + ")")
+                        if value:
+                            print(item+": "+value)
+                    print("-- No Authorization Type Detected: defaulting to code --")
+                    # Since there's no response_type we assume it's code (response_type is mandatory)
+                    oauth_parameters["response_type"]="code"
+                    self.start_security_checks(message_info, analyzed_parameters, oauth_parameters)
         
             else:
-                self.start_security_checks(message_info, analyzed_request, analyzed_parameters, oauth_parameters)
+                self.start_security_checks(message_info, analyzed_parameters, oauth_parameters)
 
-    def start_security_checks(self, message_info, analyzed_request, analyzed_parameters, oauth_parameters):
+    def start_security_checks(self, message_info, analyzed_parameters, oauth_parameters):
         global latest_oauth_server
         message_service = message_info.getHttpService()
         response_type= oauth_parameters["response_type"]
@@ -186,24 +196,28 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             
             # Perform checks according to response_type - Implicit (token) or Code modes
             if "token" in response_type:
-                self.create_new_issue("using_implicit_mode",message_service,message_info.getUrl(),[message_info])
+                self.create_new_issue("using_implicit_mode",message_service,message_info.getUrl(),[message_info],latest_oauth_server)
 
             else: 
-                self.create_new_issue("using_code_mode",message_service,message_info.getUrl(),[message_info])
+                # TODO are we gonna leave this check? This is not an issue
+                self.create_new_issue("using_code_mode",message_service,message_info.getUrl(),[message_info],latest_oauth_server)
                 
                 if oauth_parameters["code_challenge"] or oauth_parameters["code_challenge_method"] == False:
-                    self.create_new_issue("code_mode_without_PKCE",message_service,message_info.getUrl(),[message_info])
+                    self.create_new_issue("code_mode_without_PKCE",message_service,message_info.getUrl(),[message_info],latest_oauth_server)
+                    using_pkce_code_mode=False
+                else:
+                    using_pkce_code_mode=True
 
 
             # Checks applicable to both Code and Implicit modes
             if not oauth_parameters["state"]:
-                print ("Response Type 'Implicit Grant' Detected without State Paremeter")
-                self.create_new_issue("implicit_mode_without_state",message_service,message_info.getUrl(),[message_info])
+                if "code" in response_type and using_pkce_code_mode:
+                    self.create_new_issue("no_state_parameter_code_flow_with_PKCE",message_service,message_info.getUrl(),[message_info],latest_oauth_server)
+                else:
+                    self.create_new_issue("no_state_parameter",message_service,message_info.getUrl(),[message_info],latest_oauth_server)
 
             if not oauth_parameters["nonce"]:
-                print("No, Value: 'Nonce'  does not exist in dictionary")
-                print ("Response Type 'Implicit Grant' Detected without Nonce Paremeter")
-                self.create_new_issue("implicit_mode_without_nonce",message_service,message_info.getUrl(),[message_info])
+                self.create_new_issue("no_nonce_parameter",message_service,message_info.getUrl(),[message_info],latest_oauth_server)
             
             if oauth_parameters["redirect_uri"]:
                 latest_oauth_server["redirect_uri"]= str(self._helpers.urlDecode(oauth_parameters["redirect_uri"]))
@@ -255,7 +269,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
         return same_host and same_path and same_scheme
 
     
-    def create_new_issue(self, issue_id, message_service, url, message_info_list, details=None):
+    def create_new_issue(self, issue_id, message_service, url, message_info_list,oauth_server, details=None):
         issue=CustomScanIssue(   
                             issue_id,
                             message_service, 
@@ -265,30 +279,98 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                             )
         print("New issue: " + issue.getIssueName())
         self._callbacks.addScanIssue(issue)
+        dump_result_to_file(issue, oauth_server)
     
 
+    
+    def response_type_checks(self, message_info, is_callback):
+        analyzed_request= self._helpers.analyzeRequest(message_info.getRequest())
+        analyzed_parameters = analyzed_request.getParameters()
+        global latest_oauth_server
+
+        for parameter in analyzed_parameters:
+            param_name= parameter.getName().lower()
+            param_value= parameter.getValue().lower()
+
+            if not is_callback and 'response_type' in param_name and 'token' in param_value:
+                print("Tampering with response_type=code for token")
+                start_new_thread(self.tamper_with_code_response_type, (message_info, parameter, latest_oauth_server))
+            elif is_callback and 'code' in param_name or 'token' in param_name:
+                print("Tampering with response_type in callback")
+                start_new_thread(self.check_secrets_in_url, (message_info, parameter, latest_oauth_server))
+                start_new_thread(self.replay_auth_code, (message_info, parameter, latest_oauth_server))                 
+    
+    def replay_auth_code(self, message_info, parameter, latest_oauth_server):
+        try:    
+            param_name= parameter.getName().lower()
+            replay_code=False
+            if 'redirect_uri' in latest_oauth_server:
+                if 'code' in latest_oauth_server['response_type'] and "code" in param_name:
+                    replay_code=True
+            # TODO Since we do not have the redirect_uri these checks are less certain. Will do sth about it?
+            else:
+                if latest_oauth_server['response_type']==param_name and 'code' in param_name:
+                    replay_code=True
+
+            if replay_code:
+                self.send_request_and_fire_alert(message_info, parameter, parameter.getValue(), "auth_code_replayed", latest_oauth_server)
+        except:
+            print("Unexpected error replay_auth_code: ", sys.exc_info()[0], sys.exc_info()[1])
+
+    def check_secrets_in_url(self, message_info, parameter, latest_oauth_server):
+        try:
+            message_service= message_info.getHttpService()
+            url=message_info.getUrl()
+            param_name=parameter.getName().lower()
+
+            if parameter.getType()==IParameter.PARAM_URL:
+                if 'redirect_uri' in latest_oauth_server:
+                    if 'token' in latest_oauth_server['response_type'] and "token" in param_name: 
+                        self.create_new_issue("access_token_as_URL_parameter", message_service, url, [message_info], latest_oauth_server)
+                    elif 'code' in latest_oauth_server['response_type'] and "code" in param_name:
+                        self.create_new_issue("authorization_code_as_URL_parameter", message_service, url, [message_info], latest_oauth_server)
+                
+                # TODO Since we do not have the redirect_uri these checks are less certain. Will do sth about it?
+                elif latest_oauth_server['response_type']==param_name:
+                    if 'token' in param_name:
+                        self.create_new_issue("access_token_as_URL_parameter", message_service, url, [message_info], latest_oauth_server)
+                    elif 'code' in param_name:    
+                        self.create_new_issue("authorization_code_as_URL_parameter",message_service, url, [message_info], latest_oauth_server)
+        except:
+            print("Unexpected error check_secrets_in_url: ", sys.exc_info()[0], sys.exc_info()[1])
+
+    
+    def tamper_with_code_response_type(self,message_info, parameter, latest_oauth_server):
+        try:    
+            if 'response_type' in parameter.getName().lower():
+                self.send_request_and_fire_alert(message_info, parameter, 'id_token', "oauth_server_allows_implicit_auth_id_token", latest_oauth_server)
+                self.send_request_and_fire_alert(message_info, parameter, 'token', "oauth_server_allows_implicit_auth_token", latest_oauth_server)
+        except:
+            print("Unexpected error tamper_with_code_response_type: ", sys.exc_info()[0], sys.exc_info()[1])
+    
     def redirect_uri_checks(self, message_info):
         analyzed_request= self._helpers.analyzeRequest(message_info.getRequest())
         analyzed_parameters = analyzed_request.getParameters()
+        global latest_oauth_server
 
         for parameter in analyzed_parameters:
             if 'redirect' in parameter.getName().lower():
                 print("Tampering redirect_uri parameter..")
-                start_new_thread(self.tamper_redirect_uri_with_subdomain, (message_info, parameter,))
-                start_new_thread(self.tamper_redirect_uri_with_path_traversal, (message_info, parameter,))
-                start_new_thread(self.tamper_redirect_uri_with_collab_domain, (message_info, parameter,))
-                start_new_thread(self.tamper_redirect_uri_with_collab_domain, (message_info, parameter, True))
-                start_new_thread(self.tamper_redirect_uri_with_top_level_domain, (message_info, parameter,))
-                start_new_thread(self.inject_redirect_uri, (message_info,))
-                start_new_thread(self.tamper_redirect_uri_with_localhost_in_collab_domain, (message_info, parameter,))
-                start_new_thread(self.tamper_redirect_uri_with_parsing_discrepancies, (message_info, parameter,))
-                start_new_thread(self.tamper_redirect_uri_with_as_path, (message_info, parameter,))
-                start_new_thread(self.tamper_redirect_uri_with_redirect_to, (message_info, parameter,))
+                start_new_thread(self.tamper_redirect_uri_with_subdomain, (message_info, parameter, latest_oauth_server,))
+                start_new_thread(self.tamper_redirect_uri_with_path_traversal, (message_info, parameter,latest_oauth_server,))
+                start_new_thread(self.tamper_redirect_uri_with_collab_domain, (message_info, parameter,latest_oauth_server,))
+                start_new_thread(self.tamper_redirect_uri_with_parameter_pollution, (message_info, parameter, latest_oauth_server,))
+                start_new_thread(self.domain_allowed_in_redirect_uri, (message_info, parameter, latest_oauth_server,))
+                start_new_thread(self.tamper_redirect_uri_with_localhost_in_collab_domain, (message_info, parameter,latest_oauth_server,))
+                start_new_thread(self.tamper_redirect_uri_with_parsing_discrepancies, (message_info, parameter,latest_oauth_server,))
+                start_new_thread(self.tamper_redirect_uri_with_as_path, (message_info, parameter,latest_oauth_server,))
+                start_new_thread(self.tamper_redirect_uri_with_redirect_to, (message_info, parameter,latest_oauth_server,))
+                start_new_thread(self.tamper_redirect_uri_plaintext, (message_info, parameter,latest_oauth_server,))
                 break
         return
 
 
-    def tamper_redirect_uri_with_subdomain(self,message_info, parameter):
+    def tamper_redirect_uri_with_subdomain(self,message_info, parameter, latest_oauth_server):
         try:    
             param_value= parameter.getValue()
             
@@ -307,12 +389,12 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 new_param_value= urllib.quote(new_param_value, safe='')
                 
 
-            self.send_request_and_fire_alert(message_info, parameter, new_param_value, "subdomain_allowed_in_redirect_uri")
+            self.send_request_and_fire_alert(message_info, parameter, new_param_value, "subdomain_allowed_in_redirect_uri", latest_oauth_server)
         except:
             print("Unexpected error tamper_redirect_uri_with_subdomain: ", sys.exc_info()[0], sys.exc_info()[1])
 
 
-    def tamper_redirect_uri_with_path_traversal(self,message_info, parameter):
+    def tamper_redirect_uri_with_path_traversal(self,message_info, parameter, latest_oauth_server):
         try:    
             param_value= parameter.getValue()
             
@@ -331,12 +413,12 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 new_param_value= urllib.quote(new_param_value, safe='')
                 
 
-            self.send_request_and_fire_alert(message_info, parameter, new_param_value, "directory_traversal_in_redirect_uri")
+            self.send_request_and_fire_alert(message_info, parameter, new_param_value, "directory_traversal_in_redirect_uri", latest_oauth_server)
         except:
             print("Unexpected error tamper_redirect_uri_with_path_traversal: ", sys.exc_info()[0], sys.exc_info()[1])
 
     
-    def tamper_redirect_uri_with_collab_domain(self, message_info, parameter, pollute_redirect_uri=False):
+    def tamper_redirect_uri_with_parameter_pollution(self, message_info, parameter, latest_oauth_server):
         try:
             param_value= parameter.getValue()
             decoded_url= self._helpers.urlDecode(param_value)
@@ -351,19 +433,43 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             if is_url_encoded:
                 new_param_value= urllib.quote(new_param_value, safe='')
 
-            if pollute_redirect_uri:
-                new_param= self._helpers.buildParameter('redirect_uri', new_param_value, IParameter.PARAM_URL)
-                modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "polluted_redirect_uri_allowed")
-                self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'polluted_redirect_uri_allowed_with_redirection')
-            else:
-                modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri")
-                self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tampered_redirect_uri_with_redirection')
+            # Will try adding the new redirect uri before and after the legitimate one
+            # After legitimate redirect uri
+            new_param= self._helpers.buildParameter('redirect_uri', new_param_value, IParameter.PARAM_URL)
+            modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "polluted_redirect_uri_allowed", latest_oauth_server)
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'polluted_redirect_uri_allowed_with_redirection', latest_oauth_server)
+
+            # Remove the legitimate URI and put it back at the end
+            modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "polluted_redirect_uri_allowed", latest_oauth_server, parameter)
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'polluted_redirect_uri_allowed_with_redirection', latest_oauth_server)
+            
+        except:
+            print("Unexpected error tamper_redirect_uri_with_parameter_pollution: ", sys.exc_info()[0], sys.exc_info()[1])
+    
+    
+    def tamper_redirect_uri_with_collab_domain(self, message_info, parameter, latest_oauth_server):
+        try:
+            param_value= parameter.getValue()
+            decoded_url= self._helpers.urlDecode(param_value)
+            is_url_encoded= False if len(param_value)==len(decoded_url) else True
+
+            payload= self.get_collaborator_payload()
+            
+            parsed_url= urlparse(decoded_url)
+            parsed_url= parsed_url._replace(netloc=payload)
+
+            new_param_value=parsed_url.geturl()
+            if is_url_encoded:
+                new_param_value= urllib.quote(new_param_value, safe='')
+
+            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri", latest_oauth_server)
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tampered_redirect_uri_with_redirection', latest_oauth_server)
             
         except:
             print("Unexpected error tamper_redirect_uri_with_collab_domain: ", sys.exc_info()[0], sys.exc_info()[1])
 
 
-    def tamper_redirect_uri_with_top_level_domain(self, message_info, parameter):
+    def domain_allowed_in_redirect_uri(self, message_info, parameter, latest_oauth_server):
         try:    
             param_value= parameter.getValue()
             
@@ -377,25 +483,25 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             if is_url_encoded:
                 new_param_value= urllib.quote(new_param_value, safe='')
 
-            self.send_request_and_fire_alert(message_info, parameter, new_param_value, "top_level_domain_allowed_in_redirect_uri")
+            self.send_request_and_fire_alert(message_info, parameter, new_param_value, "domain_allowed_in_redirect_uri", latest_oauth_server)
         except:
             print("Unexpected error tamper_redirect_uri_with_top_level_domain: ", sys.exc_info()[0], sys.exc_info()[1])
 
 
-    def inject_redirect_uri(self, message_info):
+    def inject_redirect_uri(self, message_info, latest_oauth_server):
         try:
             payload=self._collaborator.generatePayload(True)
             new_param_value= 'https://'+payload
             new_param_value= urllib.quote(new_param_value, safe='')          
             new_param= self._helpers.buildParameter('redirect_uri', new_param_value, IParameter.PARAM_URL)
 
-            modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "injected_redirect_uri_allowed")
-            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'injected_redirect_uri_allowed_with_redirection')
+            modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "injected_redirect_uri_allowed", latest_oauth_server)
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'injected_redirect_uri_allowed_with_redirection', latest_oauth_server)
         except:
             print("Unexpected error inject_redirect_uri: ", sys.exc_info()[0], sys.exc_info()[1])
     
     
-    def tamper_redirect_uri_with_localhost_in_collab_domain(self,message_info, parameter):
+    def tamper_redirect_uri_with_localhost_in_collab_domain(self,message_info, parameter, latest_oauth_server):
         try:
             param_value= parameter.getValue()
             decoded_url= self._helpers.urlDecode(param_value)
@@ -410,13 +516,13 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             if is_url_encoded:
                 new_param_value= urllib.quote(new_param_value, safe='')
 
-            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri_localhost")
-            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tampered_redirect_uri_localhost_with_redirection')
+            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri_localhost", latest_oauth_server)
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tampered_redirect_uri_localhost_with_redirection', latest_oauth_server)
         except:
             print("Unexpected error tamper_redirect_uri_with_localhost_in_collab_domain: ", sys.exc_info()[0], sys.exc_info()[1])
 
 
-    def tamper_redirect_uri_with_parsing_discrepancies(self,message_info, parameter):
+    def tamper_redirect_uri_with_parsing_discrepancies(self,message_info, parameter, latest_oauth_server):
         # https://default-host.com&@foo.evil-user.net#@bar.evil-user.net/
         try:
             param_value= parameter.getValue()
@@ -430,13 +536,13 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             if is_url_encoded:
                 new_param_value= urllib.quote(new_param_value, safe='')
 
-            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tamper_redirect_uri_parsing_discrepancies")
-            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, payloads, 'tamper_redirect_uri_parsing_discrepancies_with_redirection')
+            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tamper_redirect_uri_parsing_discrepancies", latest_oauth_server)
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, payloads, 'tamper_redirect_uri_parsing_discrepancies_with_redirection', latest_oauth_server)
                 
         except:
             print("Unexpected error tamper_redirect_uri_with_parsing_discrepancies: ", sys.exc_info()[0], sys.exc_info()[1])
 
-    def tamper_redirect_uri_with_as_path(self,message_info, parameter):
+    def tamper_redirect_uri_with_as_path(self,message_info, parameter, latest_oauth_server):
         # This check is suppossed to work with code flow only. We use it for both options
         try:
             param_value= parameter.getValue()
@@ -450,12 +556,12 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             if is_url_encoded:
                 new_param_value= urllib.quote(new_param_value, safe='')
 
-            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tamper_redirect_uri_as_collab_path")
-            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tamper_redirect_uri_as_collab_path_with_redirection')
+            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tamper_redirect_uri_as_collab_path", latest_oauth_server)
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tamper_redirect_uri_as_collab_path_with_redirection', latest_oauth_server)
         except:
             print("Unexpected error tamper_redirect_uri_with_as_path: ", sys.exc_info()[0], sys.exc_info()[1])
     
-    def tamper_redirect_uri_with_redirect_to(self, message_info, parameter):
+    def tamper_redirect_uri_with_redirect_to(self, message_info, parameter, latest_oauth_server):
         # This check is suppossed to work with implicit flow only. We use it for both options
         try:
             param_value= parameter.getValue()
@@ -469,32 +575,60 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             else:
                 new_param_value= urllib.quote(decoded_url+ '&redirect_to=https://'+payload+'/', safe='')
 
-            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tamper_redirect_uri_with_redirect_to")
-            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tamper_redirect_uri_with_redirect_to_with_redirection')
+            modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tamper_redirect_uri_with_redirect_to", latest_oauth_server)
+            self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tamper_redirect_uri_with_redirect_to_with_redirection', latest_oauth_server)
         except:
             print("Unexpected error tamper_redirect_uri_with_redirect_to: ", sys.exc_info()[0], sys.exc_info()[1])
+
+    def tamper_redirect_uri_plaintext(self, message_info, parameter, latest_oauth_server):
+        # This check is suppossed to work with implicit flow only. We use it for both options
+        try:
+            param_value= parameter.getValue()
+            
+            decoded_url= self._helpers.urlDecode(param_value)
+            is_url_encoded= False if len(param_value)==len(decoded_url) else True
+
+            parsed_url= urlparse(decoded_url)
+
+            if parsed_url.scheme=='https':
+                parsed_url= parsed_url._replace(scheme='http')
+
+            new_param_value=parsed_url.geturl()
+            if is_url_encoded:
+                new_param_value= urllib.quote(new_param_value, safe='')
+
+            self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tamper_redirect_uri_plaintext", latest_oauth_server)
+        except:
+            print("Unexpected error tamper_redirect_uri_plaintext: ", sys.exc_info()[0], sys.exc_info()[1])
     
-    def fetch_collab_interactions_and_fire_alert(self, message_info, modified_message_info, payload_list, issue_id):
+    def get_collaborator_payload(self):
+        if self._is_community_edition:
+            return 'google.com'
+        else:
+            return self._collaborator.generatePayload(True)
+    
+    def fetch_collab_interactions_and_fire_alert(self, message_info, modified_message_info, payload_list, issue_id, latest_oauth_server):
         # Wait a prudent time to see if any request was issued to the collab payload
         time.sleep(60)
         for payload in payload_list:
             collab_interactions= self._collaborator.fetchCollaboratorInteractionsFor(payload)
             if collab_interactions:
                 details= get_collabs_interactions_summary(collab_interactions)
-                self.create_new_issue(issue_id, message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], details)
+                self.create_new_issue(issue_id, message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info],latest_oauth_server, details)
     
     def state_parameter_checks(self, message_info):
-            analyzed_request= self._helpers.analyzeRequest(message_info.getRequest())
-            analyzed_parameters = analyzed_request.getParameters()
+        analyzed_request= self._helpers.analyzeRequest(message_info.getRequest())
+        analyzed_parameters = analyzed_request.getParameters()
+        global latest_oauth_server
 
-            for parameter in analyzed_parameters:
-                if 'state' in parameter.getName().lower():
-                    print("Tampering state parameter..")
-                    start_new_thread(self.replay_state_parameter, (message_info, parameter,))
-                    start_new_thread(self.tamper_state_parameter, (message_info, parameter,))
-                    start_new_thread(self.assess_state_parameter_entropy, (message_info, parameter,))
-                    break
-            return
+        for parameter in analyzed_parameters:
+            if 'state' in parameter.getName().lower():
+                print("Tampering state parameter..")
+                start_new_thread(self.replay_state_parameter, (message_info, parameter, latest_oauth_server,))
+                start_new_thread(self.tamper_state_parameter, (message_info, parameter,latest_oauth_server,))
+                start_new_thread(self.assess_state_parameter_entropy, (message_info, parameter,))
+                break
+        return
 
     
     def assess_state_parameter_entropy(self, message_info, parameter):
@@ -502,26 +636,25 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
         return
     
     
-    def tamper_state_parameter(self, message_info, parameter):
+    def tamper_state_parameter(self, message_info, parameter, latest_oauth_server):
         try:
             param_value= parameter.getValue()
             new_param_value= changeChar(param_value, random.randrange(1,len(param_value)))
-            self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_state_parameter_allowed")
+            self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_state_parameter_allowed",latest_oauth_server)
         except:
             print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
         
 
-    def replay_state_parameter(self, message_info, parameter):
+    def replay_state_parameter(self, message_info, parameter, latest_oauth_server):
         try:
-            self.send_request_and_fire_alert(message_info, parameter, parameter.getValue(), "replayed_state_parameter_allowed")
+            self.send_request_and_fire_alert(message_info, parameter, parameter.getValue(), "replayed_state_parameter_allowed", latest_oauth_server)
         except:
             print("Unexpected error: ", sys.exc_info()[0], sys.exc_info()[1])
 
 
-    def send_request_and_fire_alert(self, message_info, parameter, new_param_value, issue_id):
-        if new_param_value is None:
-            new_request= self._helpers.addParameter(message_info.getRequest(), parameter)
-        else:
+    def send_request_and_fire_alert(self, message_info, parameter, new_param_value, issue_id, latest_oauth_server, param_to_delete=None):            
+        
+        if new_param_value:
             new_request= self._helpers.updateParameter(message_info.getRequest(), self._helpers.buildParameter(
                 parameter.getName(),
                 new_param_value,
@@ -531,7 +664,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
         
         details=self.get_variations_summary(message_info, modified_message_info)
         if self.equal_status_code(message_info, modified_message_info):
-            self.create_new_issue(issue_id, message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], details)
+            self.create_new_issue(issue_id, message_info.getHttpService(),message_info.getUrl(),[message_info,modified_message_info], latest_oauth_server, details)
             return modified_message_info
         
 
@@ -587,6 +720,54 @@ def get_collabs_interactions_summary(collab_interactions):
 
 #     return buf
 
+def get_inherited_doc(issue_documentation):
+    global issues_documentation
+    if 'inherit_from' in issue_documentation:
+        # Get inherited documentation recursively
+        inherit_issue_documentation= get_inherited_doc(issues_documentation[issue_documentation['inherit_from']])
+        
+        # Override the rest of the existing fields
+        if "name" in issue_documentation:
+            inherit_issue_documentation["name"]= issue_documentation["name"]
+        if "issue_background" in issue_documentation:
+            inherit_issue_documentation["issue_background"]= issue_documentation["issue_background"]
+        if "severity" in issue_documentation:
+            inherit_issue_documentation["severity"]= issue_documentation["severity"]
+        if "confidence" in issue_documentation:
+            inherit_issue_documentation["confidence"]= issue_documentation["confidence"]
+        if "remediation_detail" in issue_documentation:
+            inherit_issue_documentation["remediation_detail"]= issue_documentation["remediation_detail"]
+        
+        return inherit_issue_documentation
+    else:
+        return issue_documentation
+
+def dump_result_to_file(scan_issue, oauth_server, change_url=None):
+    global my_mutex
+    my_mutex.acquire()
+
+    with open('results.json', 'r+', buffering=0) as f_results:
+        research_results = json.load(f_results)
+        
+        if change_url:
+            print("Renaming server URL")
+            if oauth_server['server_url'] in research_results:
+                research_results[change_url]=research_results.pop(oauth_server['server_url'])
+
+        else:
+            if oauth_server['server_url'] in research_results:
+                research_results[oauth_server['server_url']].append(scan_issue.getIssueId())
+            else:
+                research_results[oauth_server['server_url']]= [scan_issue.getIssueId()]
+    
+        f_results.seek(0)
+        f_results.write(json.dumps(research_results))
+        f_results.truncate()
+        f_results.flush()
+
+    my_mutex.release()
+    
+
 class CustomScanIssue(IScanIssue):
     def __init__(self, issue_id, httpService, url, httpMessages, detail=None):
         self._httpService = httpService
@@ -594,7 +775,8 @@ class CustomScanIssue(IScanIssue):
         self._httpMessages = httpMessages
         
         global issues_documentation
-        issue_documentation=issues_documentation[issue_id]
+        issue_documentation= get_inherited_doc(issues_documentation[issue_id]) 
+        self._issue_id= issue_id
         self._name = issue_documentation["name"]
         self._issue_background = issue_documentation["issue_background"]
         self._severity = issue_documentation["severity"]
@@ -602,6 +784,9 @@ class CustomScanIssue(IScanIssue):
         self._remediation_detail= issue_documentation["remediation_detail"]
         self._detail=detail
 
+    def getIssueId(self):
+        return self._issue_id
+    
     def getUrl(self):
         return self._url
 
@@ -637,4 +822,3 @@ class CustomScanIssue(IScanIssue):
 
     def getHttpService(self):
         return self._httpService
-        

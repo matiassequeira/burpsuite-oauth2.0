@@ -27,8 +27,8 @@
         "confidence":"Certain",
         "remediation_detail":"TODO Remediation"
     },
-    "implicit_mode_without_nonce":{
-        "name":"Using OAuth Implicit Mode without Nonce Parameter",
+    "no_nonce_parameter":{
+        "name":"Using OAuth Without Nonce Parameter",
         "issue_background":"TODO Issue Background",
         "severity":"Medium",
         "confidence":"Certain",
