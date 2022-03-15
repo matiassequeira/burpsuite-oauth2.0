@@ -37,7 +37,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
         self._callbacks = callbacks
         self._callbacks.setExtensionName("OAuth2.0 Extender")
         
-        self._is_community_edition= True
+        self._is_community_edition= False
         if 'community' in str(self._callbacks.getBurpVersion()).lower():
             print("Using Burp Community Edition. Will not use Burp Collaborator payloads")
             self._is_community_edition= True
@@ -138,42 +138,44 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                         #print "FOUND AN OAUTH PARAMETER", oauth_parameter
                         oauth_parameters[oauth_parameter] = parameter.getValue().lower()
                         
-            if oauth_parameters["client_id"] and oauth_parameters["response_type"]:
-                message_info.setHighlight("blue")
-                message_info.setComment("OAuth 2.0 Authorization Request")
-                print("HTTP service: " + str(message_service)) #Delete this print
-                if str(message_service) not in oauth_urls_identified:
-                    oauth_urls_identified[str(message_service)]=[ oauth_parameters["response_type"] ]
-                    print("------   New OAuth Identified   ------")
+            # Count how many OAuth params we have
+            param_count=0
+            for oauth_param in oauth_parameters:
+                if oauth_parameters[oauth_param]:
+                    param_count+=1
+            
+            if oauth_parameters["client_id"]:
+                if oauth_parameters["response_type"]:
+                    message_info.setHighlight("blue")
+                    message_info.setComment("OAuth 2.0 Authorization Request")
+                    print("------  OAuth Identified   ------")
                     print("URL observed was : " + str(message_info.getUrl()))
                     print(" Parameters observed in the request indicating OAuth presence were:")
                     for item, value in oauth_parameters.items():
                         if value:
                             print(item+": "+value)
                     print("-- Authorization Type Detected: " + oauth_parameters['response_type'] + " --")               
-
-                    self.start_security_checks(message_info, analyzed_request, analyzed_parameters, oauth_parameters )
-
+                    self.start_security_checks(message_info, analyzed_parameters, oauth_parameters )
                     
-                elif oauth_parameters["response_type"] not in oauth_urls_identified[str(message_service)]:
-                    oauth_urls_identified[str(message_service)].append( oauth_parameters["response_type"] )
-                    print("------   Existing OAuth With Different Flow Identified   ------")
+                # No response_type. Check if we have an acceptable amount of parameters 
+                elif param_count>=3:
+                    message_info.setHighlight("blue")
+                    message_info.setComment("OAuth 2.0 Authorization Request")
+                    print("------  OAuth Identified   ------")
                     print("URL observed was : " + str(message_info.getUrl()))
                     print(" Parameters observed in the request indicating OAuth presence were:")
                     for item, value in oauth_parameters.items():
-                        if value == True:
-                            print("     > " + item)
-                    print("-- Authorization Type Detected: " + oauth_parameters["response_type"] + " --")
-
-                    self.start_security_checks(message_info, analyzed_request, analyzed_parameters, oauth_parameters )
-                
-                else:
-                    print("Existing OAuth Url Observed: " + str(message_service) + " (" + str(message_info.getUrl()) + ")")
+                       if value:
+                            print(item+": "+value)
+                    print("-- No Authorization Type Detected: defaulting to code --")
+                    # Since there's no response_type we assume it's code (response_type is mandatory)
+                    oauth_parameters["response_type"]="code"
+                    self.start_security_checks(message_info, analyzed_parameters, oauth_parameters)
         
             else:
-                self.start_security_checks(message_info, analyzed_request, analyzed_parameters, oauth_parameters)
+                self.start_security_checks(message_info, analyzed_parameters, oauth_parameters)
 
-    def start_security_checks(self, message_info, analyzed_request, analyzed_parameters, oauth_parameters):
+    def start_security_checks(self, message_info, analyzed_parameters, oauth_parameters):
         global latest_oauth_server
         message_service = message_info.getHttpService()
         response_type= oauth_parameters["response_type"]
@@ -215,7 +217,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
             # TODO this is an IOpenID check, are we gonna leave it?
             if not oauth_parameters["nonce"]:
-                self.create_new_issue("implicit_mode_without_nonce",message_service,message_info.getUrl(),[message_info])
+                self.create_new_issue("no_nonce_parameter",message_service,message_info.getUrl(),[message_info])
             
             if 'redirect_uri' in oauth_parameters:
                 latest_oauth_server['redirect_uri']= str(self._helpers.urlDecode(oauth_parameters['redirect_uri']))
@@ -223,7 +225,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             else:
                 start_new_thread(self.inject_redirect_uri, (message_info,False,))
             
-            print("Finishing security checks")
+            print("Finishing security checks: auth request")
                 
         elif response_type: 
             print("'response_type' " + response_type + "not recognized. Please FILE AN ISSUE in out Github with as much detail as possible!")
@@ -253,7 +255,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 if redirect_uri_present:
                     # It is safe to reset this variable
                     latest_oauth_server=dict()
-                    print("Finishing security checks")
+                    print("Finishing security checks: : callback request")
             
         
         return
@@ -294,10 +296,10 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             param_value= parameter.getValue().lower()
 
             if not is_callback and 'response_type' in param_name and 'token' in param_value:
-                print("Tampering with response_type=code for token")
+                print("Tampering with response_type=code for response_type=token")
                 start_new_thread(self.tamper_with_code_response_type, (message_info, parameter))
             elif is_callback and 'code' in param_name or 'token' in param_name:
-                print("Tampering with response_type in callback")
+                print("response_type checks in callback")
                 start_new_thread(self.check_secrets_in_url, (message_info, parameter, latest_oauth_server))
                 start_new_thread(self.replay_auth_code, (message_info, parameter, latest_oauth_server))                 
     
@@ -434,7 +436,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
             # Will try adding the new redirect uri before and after the legitimate one
             # After legitimate redirect uri
-            new_param= self._helpers.buildParameter('redirect_uri', new_param_value, IParameter.PARAM_URL)
+            new_param= self._helpers.buildParameter('redirect_uri', new_param_value, parameter.getType())
             modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "polluted_redirect_uri_allowed")
             self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'polluted_redirect_uri_allowed_with_redirection')
 
@@ -463,7 +465,6 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
             modified_message_info= self.send_request_and_fire_alert(message_info, parameter, new_param_value, "tampered_redirect_uri")
             self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'tampered_redirect_uri_with_redirection')
-            
         except:
             print("Unexpected error tamper_redirect_uri_with_collab_domain: ", sys.exc_info()[0], sys.exc_info()[1])
 

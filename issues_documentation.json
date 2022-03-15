@@ -40,7 +40,7 @@
         "issue_background":"Lack of the \"state\" parameter makes the client vulnerable to CSRF attacks. However, a potential CRSF attack would be mitigated by the PKCE mechanism implemented on the server.",
         "severity":"Information"
     },
-    "implicit_mode_without_nonce":{
+    "no_nonce_parameter":{
         "name":"Using OAuth Without Nonce Parameter",
         "issue_background":"TODO Issue Background",
         "severity":"Medium",
