@@ -16,6 +16,7 @@ OAuth2.0 Extender is a [Burp Suite](https://portswigger.net/burp/) extension to 
 - [TODO] In case the OAuth 2.0 parameters' names do not follow the standard convention, allow the user to indicate the tool the naming convention for the parameters used
 - [TODO] Allow user to provide own hostname/domain
 - [TODO] OpenID checks support
+- [TODO] Add tab to show Issues on Burp Community Edition
 
 ## Requirements
 - [Jython](https://www.jython.org/download) >= 2.7.1
@@ -31,7 +32,12 @@ OAuth2.0 Extender is a [Burp Suite](https://portswigger.net/burp/) extension to 
 ## Usage
 OAuth 2.0 Extender listens to requests and responses going through the Burp Suite Proxy, and will automatically detect, audit and pentest an OAuth 2.0 dance.
 
-However, if you missed an OAuth 2.0 process and want to test it, you can `Right click > Extensions > OAuth 2.0 Extender > Send to OAuth 2.0 Extender` your OAuth 2.0 requests which will be analyzed by the extension
+However, if you missed an OAuth 2.0 process and want to test it, you can `Right click > Extensions > OAuth 2.0 Extender > Send to OAuth 2.0 Extender` your OAuth 2.0 requests which will be analyzed by the extension.
+
+Finally, depending on your Burp version, discovered issues can be found in:
+
+* Burp Professional: Dashboard tab -> Issues field
+* Burp Community Edition: momentarily, you'll be able to find the issues in Extender tab -> Output tab for OAuth 2.0 Extender extension. To get extra information about the requests that were used to discover the issue, you can install the Logger++ extension to see them
 
 ### Screenshots
 Right click > Extensions > OAuth 2.0 Extender > Send to OAuth 2.0 Extender :
