@@ -282,8 +282,8 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                             details
                             )
         print("New issue: "+issue.getIssueName()+" ("+issue_id+") ")
-        self._callbacks.addScanIssue(issue)
-    
+        if not self._is_community_edition:
+            self._callbacks.addScanIssue(issue)
 
     
     def response_type_checks(self, message_info, is_callback):
@@ -608,6 +608,8 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             return self._collaborator.generatePayload(True)
     
     def fetch_collab_interactions_and_fire_alert(self, message_info, modified_message_info, payload_list, issue_id):
+        if self._is_community_edition:
+            return
         # Wait a prudent time to see if any request was issued to the collab payload
         # TODO check the referrer header and URL parameters to make sure code/state are contained in it. If they are not, it's just open redifect
         time.sleep(60)
