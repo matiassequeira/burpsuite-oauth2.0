@@ -40,13 +40,6 @@
         "issue_background":"Lack of the \"state\" parameter makes the client vulnerable to CSRF attacks. However, a potential CRSF attack would be mitigated by the PKCE mechanism implemented on the server.",
         "severity":"Information"
     },
-    "no_nonce_parameter":{
-        "name":"Using OAuth Without Nonce Parameter",
-        "issue_background":"TODO Issue Background",
-        "severity":"Medium",
-        "confidence":"Certain",
-        "remediation_detail":"TODO Remediation"
-    },
     "authorization_code_as_URL_parameter":{
         "name":"Passing Authorization Code as Parameter in URL",
         "issue_background":"When a browser navigates to \"client.example/redirection_endpoint?code=abcd\" or \"client.example/redirection_endpoint?id_token=abcd\" as a result of a redirect from a provider's authorization endpoint, the URL including the Authorization Code or Access Token may end up in the browser's history.  An attacker with access to the device could obtain the code and try to replay it.",

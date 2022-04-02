@@ -215,10 +215,6 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 else:
                     self.create_new_issue("no_state_parameter",message_service,message_info.getUrl(),[message_info])
 
-            # TODO this is an IOpenID check, are we gonna leave it?
-            if not oauth_parameters["nonce"]:
-                self.create_new_issue("no_nonce_parameter",message_service,message_info.getUrl(),[message_info])
-            
             if 'redirect_uri' in oauth_parameters:
                 latest_oauth_server['redirect_uri']= str(self._helpers.urlDecode(oauth_parameters['redirect_uri']))
                 self.redirect_uri_checks(message_info)
