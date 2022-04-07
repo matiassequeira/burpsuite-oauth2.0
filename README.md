@@ -25,7 +25,7 @@ OAuth2.0 Extender is a [Burp Suite](https://portswigger.net/burp/) extension to 
 
 1. Clone this repository in your host:
 
-    `git clone ...`
+    `git clone https://github.com/matiassequeira/burpsuite-oauth2.0`
 
 2. In Burp Suite, go to `Extender > Extensions` tab, click on the `Add` button, select Extension type `Python`  and load the `app.py` py file.
 
