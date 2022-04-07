@@ -42,8 +42,10 @@ Finally, depending on your Burp version, discovered issues can be found in:
 ### Screenshots
 Right click > Extensions > OAuth 2.0 Extender > Send to OAuth 2.0 Extender :
 
-[TODO] Add screenshots
+<p align="center">
+  <img src="https://github.com/matiassequeira/burpsuite-oauth2.0/blob/main/images/proxy-menu.png" />
+</p>
 
 ## Reporting bugs and collaboration
-- If you encountered a bug 🥴 and would like us to fix it, please use the GitHub [Bug Report](TODO) feature
+- If you encountered a bug 🥴 and would like us to fix it, please use the GitHub [Bug Report](https://github.com/matiassequeira/burpsuite-oauth2.0/issues/new) feature
 - If you want to collaborate, please read the [CONTRIBUTING](./CONTRIBUTING.md) file. Also, feel free to reach out to any team member using your preferred mechanism
