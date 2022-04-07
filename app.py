@@ -119,6 +119,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
         analyzed_request= self._helpers.analyzeRequest(message_info.getRequest())
         message_service = message_info.getHttpService()
         global latest_oauth_server
+        # https://datatracker.ietf.org/doc/html/rfc6749#section-11.2.2
         oauth_parameters = { "client_id": False,
                             "response_type" : False,
                             "redirect_uri": False,
@@ -129,8 +130,6 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                             "code_challenge_method": False
                             }
         
-        oauth_identified = False # TODO will this be used?
-        #print ("Headers are: ", analyzed_request.getHeaders())
         if analyzed_request.getParameters():
             analyzed_parameters = analyzed_request.getParameters()
             for parameter in analyzed_parameters:
@@ -184,9 +183,9 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
         message_service = message_info.getHttpService()
         response_type= oauth_parameters["response_type"]
 
-        print("Starting security checks:")
         #Start Check if Implicit Mode by "Token" in response_type or Authorizaiton Code Mode by "code" in response_type
-        if response_type and ("token" or "code" in response_type):
+        if response_type and ("token" in response_type or "code" in response_type):
+            print("Starting security checks: auth request")
 
             # Store some information that will be used to analyze the callback (redirect) request
             latest_oauth_server=dict()
@@ -208,6 +207,8 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 else:
                     using_pkce_code_mode=True
 
+                self.response_type_checks(message_info, is_callback=False)
+                
 
             # Checks applicable to both Code and Implicit modes
             if not oauth_parameters["state"]:
@@ -216,44 +217,44 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 else:
                     self.create_new_issue("no_state_parameter",message_service,message_info.getUrl(),[message_info],latest_oauth_server)
 
-            if not oauth_parameters["nonce"]:
-                self.create_new_issue("no_nonce_parameter",message_service,message_info.getUrl(),[message_info],latest_oauth_server)
-            
             if oauth_parameters["redirect_uri"]:
                 latest_oauth_server["redirect_uri"]= str(self._helpers.urlDecode(oauth_parameters["redirect_uri"]))
                 self.redirect_uri_checks(message_info)
             else:
-                latest_oauth_server["redirect_uri"]=None
                 start_new_thread(self.inject_redirect_uri, (message_info,False,))
                 
+            print("Finishing security checks: auth request")
+                
         elif response_type: 
-            print("'response_type' " + response_type + "not recognized. Please contact support")
+            print("'response_type' " + response_type + "not recognized. Please FILE AN ISSUE in out Github with as much detail as possible!")
         
         elif not response_type and len(latest_oauth_server)>0:  
-            if latest_oauth_server['redirect_uri'] and self.urls_match(latest_oauth_server['redirect_uri'], message_info):
+            analyze_callback_request= False
+            redirect_uri_present= False
+
+            if 'redirect_uri' in latest_oauth_server and self.urls_match(latest_oauth_server['redirect_uri'], message_info):                
+                analyze_callback_request= True
+                redirect_uri_present= True
             
+            elif 'redirect_uri' not in latest_oauth_server: 
+                # #No redirect_uri, will use tighter comparisons then
                 for parameter in analyzed_parameters:   
-                    if parameter.getType()==IParameter.PARAM_URL:
-                        if 'token' in latest_oauth_server['response_type'] and "token" in parameter.getName().lower(): 
-                            self.create_new_issue("access_token_as_URL_parameter", message_service,message_info.getUrl(),[message_info])
-                        elif 'code' in latest_oauth_server['response_type'] and "code" in parameter.getName().lower():
-                            self.create_new_issue("access_code_as_URL_parameter",message_service,message_info.getUrl(),[message_info])
+                    if latest_oauth_server['response_type'] == parameter.getName().lower():
+                        analyze_callback_request= True
+            
+            if analyze_callback_request:            
+                print("Starting security checks: callback request")
+                message_info.setHighlight("blue")
+                message_info.setComment("OAuth 2.0 Callback Request")
             
                 self.state_parameter_checks(message_info)
+                self.response_type_checks(message_info, is_callback=True)
 
-                # It is safe to reset this variable
-                latest_oauth_server=dict()
-
-            elif not latest_oauth_server['redirect_uri']: #No redirect_uri, will use tighter comparisons then
-                # TODO Since we do not have the redirect_uri these checks are less certain. Will do sth about it?
-                for parameter in analyzed_parameters:
-                    if latest_oauth_server['response_type'] == parameter.getName().lower() and parameter.getType()==IParameter.PARAM_URL: 
-                        if 'token' in latest_oauth_server['response_type']:
-                            self.create_new_issue("access_token_as_URL_parameter", message_service,message_info.getUrl(),[message_info])
-                        elif 'code' in latest_oauth_server['response_type']:    
-                            self.create_new_issue("access_code_as_URL_parameter",message_service,message_info.getUrl(),[message_info])
-            
-                        self.state_parameter_checks(message_info)
+                if redirect_uri_present:
+                    # It is safe to reset this variable
+                    latest_oauth_server=dict()
+                    print("Finishing security checks: : callback request")
+                    
         return
     
     def urls_match(self, url, message_info):
@@ -277,12 +278,12 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                             message_info_list, 
                             details
                             )
-        print("New issue: " + issue.getIssueName())
-        self._callbacks.addScanIssue(issue)
+        print("New issue: "+issue.getIssueName()+" ("+issue_id+") ")
+        if not self._is_community_edition:
+            self._callbacks.addScanIssue(issue)
         dump_result_to_file(issue, oauth_server)
     
 
-    
     def response_type_checks(self, message_info, is_callback):
         analyzed_request= self._helpers.analyzeRequest(message_info.getRequest())
         analyzed_parameters = analyzed_request.getParameters()
@@ -424,7 +425,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             decoded_url= self._helpers.urlDecode(param_value)
             is_url_encoded= False if len(param_value)==len(decoded_url) else True
 
-            payload=self._collaborator.generatePayload(True)
+            payload= self.get_collaborator_payload()
             
             parsed_url= urlparse(decoded_url)
             parsed_url= parsed_url._replace(netloc=payload)
@@ -435,7 +436,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
             # Will try adding the new redirect uri before and after the legitimate one
             # After legitimate redirect uri
-            new_param= self._helpers.buildParameter('redirect_uri', new_param_value, IParameter.PARAM_URL)
+            new_param= self._helpers.buildParameter('redirect_uri', new_param_value, parameter.getType())
             modified_message_info= self.send_request_and_fire_alert(message_info, new_param, None, "polluted_redirect_uri_allowed", latest_oauth_server)
             self.fetch_collab_interactions_and_fire_alert(message_info, modified_message_info, [payload], 'polluted_redirect_uri_allowed_with_redirection', latest_oauth_server)
 
@@ -485,12 +486,12 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
             self.send_request_and_fire_alert(message_info, parameter, new_param_value, "domain_allowed_in_redirect_uri", latest_oauth_server)
         except:
-            print("Unexpected error tamper_redirect_uri_with_top_level_domain: ", sys.exc_info()[0], sys.exc_info()[1])
+            print("Unexpected error domain_allowed_in_redirect_uri: ", sys.exc_info()[0], sys.exc_info()[1])
 
 
     def inject_redirect_uri(self, message_info, latest_oauth_server):
         try:
-            payload=self._collaborator.generatePayload(True)
+            payload= self.get_collaborator_payload()
             new_param_value= 'https://'+payload
             new_param_value= urllib.quote(new_param_value, safe='')          
             new_param= self._helpers.buildParameter('redirect_uri', new_param_value, IParameter.PARAM_URL)
@@ -507,7 +508,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             decoded_url= self._helpers.urlDecode(param_value)
             is_url_encoded= False if len(param_value)==len(decoded_url) else True
 
-            payload=self._collaborator.generatePayload(True)
+            payload= self.get_collaborator_payload()
 
             parsed_url= urlparse(decoded_url)
             parsed_url= parsed_url._replace(netloc='localhost.'+payload)
@@ -529,7 +530,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             decoded_url= self._helpers.urlDecode(param_value)
             is_url_encoded= False if len(param_value)==len(decoded_url) else True
 
-            payloads= [self._collaborator.generatePayload(True), self._collaborator.generatePayload(True)]
+            payloads= [self.get_collaborator_payload(), self.get_collaborator_payload()]
             parsed_url= urlparse(decoded_url)
             parsed_url= parsed_url._replace(netloc=parsed_url.netloc+'&@'+payloads[0]+'#@'+payloads[1])
             new_param_value=parsed_url.geturl()
@@ -550,7 +551,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             is_url_encoded= False if len(param_value)==len(decoded_url) else True
 
             parsed_url= urlparse(decoded_url)
-            payload=self._collaborator.generatePayload(True)
+            payload= self.get_collaborator_payload()
             
             new_param_value= 'https://'+payload+'/'+parsed_url.netloc+parsed_url.path
             if is_url_encoded:
@@ -568,7 +569,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             decoded_url= self._helpers.urlDecode(param_value)
             is_url_encoded= False if len(param_value)==len(decoded_url) else True
 
-            payload=self._collaborator.generatePayload(True)
+            payload= self.get_collaborator_payload()
 
             if is_url_encoded:
                 new_param_value= urllib.quote(decoded_url+ urllib.quote('&redirect_to=https://'+payload+'/' , safe=''), safe='')
@@ -608,7 +609,10 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
             return self._collaborator.generatePayload(True)
     
     def fetch_collab_interactions_and_fire_alert(self, message_info, modified_message_info, payload_list, issue_id, latest_oauth_server):
+        if self._is_community_edition:
+            return
         # Wait a prudent time to see if any request was issued to the collab payload
+        # TODO check the referrer header and URL parameters to make sure code/state are contained in it. If they are not, it's just open redifect
         time.sleep(60)
         for payload in payload_list:
             collab_interactions= self._collaborator.fetchCollaboratorInteractionsFor(payload)
@@ -660,6 +664,14 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 new_param_value,
                 parameter.getType()
             ))
+        else:
+            new_request= self._helpers.addParameter(message_info.getRequest(), parameter)
+
+            if param_to_delete:
+                # Remove the legitimate URI and put it back at the end
+                new_request= self._helpers.removeParameter(new_request, param_to_delete)
+                new_request= self._helpers.addParameter(new_request, param_to_delete)
+            
         modified_message_info= self._callbacks.makeHttpRequest(message_info.getHttpService(), new_request)
         
         details=self.get_variations_summary(message_info, modified_message_info)
