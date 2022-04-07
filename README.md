@@ -37,7 +37,7 @@ However, if you missed an OAuth 2.0 process and want to test it, you can `Right 
 Finally, depending on your Burp version, discovered issues can be found in:
 
 * Burp Professional: Dashboard tab -> Issues field
-* Burp Community Edition: momentarily, you'll be able to find the issues in Extender tab -> Output tab for OAuth 2.0 Extender extension. To get extra information about the requests that were used to discover the issue, you can install the Logger++ extension to see them
+* Burp Community Edition: momentarily, you'll be able to find the issues in Extender tab -> Output tab for OAuth 2.0 Extender extension. To get extra information about the requests that were used to discover the issue, you can install the Logger++ extension to see them. You can also helo yourself looking at the [issues documentation](./issues_documentation.json) 
 
 ### Screenshots
 
