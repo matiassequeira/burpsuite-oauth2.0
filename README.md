@@ -43,7 +43,11 @@ Finally, depending on your Burp version, discovered issues can be found in:
 Right click > Extensions > OAuth 2.0 Extender > Send to OAuth 2.0 Extender :
 
 <p align="center">
-  <img src="https://github.com/matiassequeira/burpsuite-oauth2.0/blob/main/images/proxy-menu.png" />
+  <img src="./images/issues.png" />
+</p>
+
+<p align="center">
+  <img src="./images/issues-small.png" />
 </p>
 
 ## Reporting bugs and collaboration
