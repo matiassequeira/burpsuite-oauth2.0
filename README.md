@@ -40,14 +40,22 @@ Finally, depending on your Burp version, discovered issues can be found in:
 * Burp Community Edition: momentarily, you'll be able to find the issues in Extender tab -> Output tab for OAuth 2.0 Extender extension. To get extra information about the requests that were used to discover the issue, you can install the Logger++ extension to see them
 
 ### Screenshots
-Right click > Extensions > OAuth 2.0 Extender > Send to OAuth 2.0 Extender :
+In proxy right click > Extensions > OAuth 2.0 Extender > Send to OAuth 2.0 Extender:
 
 <p align="center">
-  <img src="./images/issues.png" />
+  <img src="./images/proxy-small.png" />
 </p>
+
+In the dashboard, the resulting Issues for Professional Edition:
 
 <p align="center">
   <img src="./images/issues-small.png" />
+</p>
+
+In Extender, the logs below output the resulting Issues (useful for Community Edition)
+
+<p align="center">
+  <img src="./images/extender-small.png" />
 </p>
 
 ## Reporting bugs and collaboration
