@@ -53,7 +53,7 @@
         "remediation_detail":"Clients MUST NOT pass access tokens in a URI query parameter. The Authorization Code grant or alternative OAuth response modes like the form post response mode [oauth-v2-form-post-response-mode] can be used to this end."
     },
     "tampered_state_parameter_allowed":{
-        "name":"Server accepts modified State Parameter",
+        "name":"Server Accepts Modified State Parameter",
         "issue_background":"Not validating the \"state\" parameter makes the client vulnerable to CSRF attacks - i.e. an attacker trying to access to the victim's account by tricking the user into clicking on a link to the Authorization Server at a time when the user is already authenticated. Another example is an attacker tricking the victim to use the attacker's account by injecting its Authorization Code or Access Token.",
         "severity":"High",
         "confidence":"Tentative",
