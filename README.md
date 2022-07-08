@@ -10,6 +10,7 @@ OAuth2.0 Extender is a [Burp Suite](https://portswigger.net/burp/) extension to 
 - Lack of validation around the redirect_uri parameter, such as tampering and injection which could lead to open redirects or secrets leakage
 - Open redirection and secrets leakage via redirect_uri parameter (Burp Suite Pro only)
 - OAuth 2.0 grant types supported by the server
+- [TODO] Detect third-party Javascript inclusions as explained [here](https://labs.detectify.com/2022/07/06/account-hijacking-using-dirty-dancing-in-sign-in-oauth-flows/)
 - [TODO] Redeem Access Tokens or Authorization Codes multiple times via requests replay
 - [TODO] Incorrect implementation of the PKCE mechanism if implemented (tamper with 'code_challenge' parameter)
 - [TODO] OAuth 2.0 secrets leakage via Referer Header
