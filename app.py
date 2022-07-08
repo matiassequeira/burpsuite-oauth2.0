@@ -51,10 +51,6 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
         # register ourselves as an HTTP listener
         self._callbacks.registerHttpListener(self)
-
-        # register ourselves as a custom scanner check
-        #Commented out because it errored on running
-        #callbacks.registerScannerCheck(self)
         
         # register ourselves as an extension state listener
         self._callbacks.registerExtensionStateListener(self)
@@ -79,15 +75,10 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                               invocation.CONTEXT_INTRUDER_PAYLOAD_POSITIONS, invocation.CONTEXT_SCANNER_RESULTS, 
                               invocation.CONTEXT_SEARCH_RESULTS]
 
-        # TODO should we allow the user to send multiple messages?
+        # User can just send one message. If required we could allow more than one
         if self._context.getInvocationContext() in invocation_allowed and len(self._context.selectedMessages) == 1:
             parentMenu = JMenuItem('Send to OAuth2.0 Extender', actionPerformed=self.MenuAction)
             menuList.add(parentMenu)
-
-        # TODO delete this
-        # Request info
-        # iRequestInfo = self._helpers.analyzeRequest(self._context.getSelectedMessages()[0])
-        # self.setData(iRequestInfo)
 
         return menuList
 
@@ -98,7 +89,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
 
 
     def processHttpMessage(self, toolFlag, messageIsRequest, messageInfo):
-        #  if you want the request before leaving Burp or if you want to capture the request after it gets a response. For that, you have the Boolean messageIsRequest—a setting of true will capture the request before leaving, and false will capture it with a response.
+        #if you want the request before leaving Burp or if you want to capture the request after it gets a response. For that, you have the Boolean messageIsRequest—a setting of true will capture the request before leaving, and false will capture it with a response.
         #Check if Message is a Request and then check if it is coming from tool "Proxy".  If so, then analyze the request and go through thev parameters and see if any match known OAuth parameters. If so, Report.
         if not messageIsRequest:
             if str(self._callbacks.getToolName(toolFlag)) == "Proxy":
@@ -114,7 +105,6 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
               
     def detect_oauth(self, message_info):
         analyzed_request= self._helpers.analyzeRequest(message_info.getRequest())
-        message_service = message_info.getHttpService()
         global latest_oauth_server
         # https://datatracker.ietf.org/doc/html/rfc6749#section-11.2.2
         oauth_parameters = { "client_id": False,
@@ -130,12 +120,8 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
         if analyzed_request.getParameters():
             analyzed_parameters = analyzed_request.getParameters()
             for parameter in analyzed_parameters:
-                #print parameter.getName().lower()
                 for oauth_parameter in oauth_parameters:
-                    #print "oauth_parameter", oauth_parameter
-                    #print "Parameter", parameter.getName()
                     if parameter.getName().lower()  == oauth_parameter:
-                        #print "FOUND AN OAUTH PARAMETER", oauth_parameter
                         oauth_parameters[oauth_parameter] = parameter.getValue().lower()
                         
             # Count how many OAuth params we have
@@ -235,7 +221,7 @@ class BurpExtender(IBurpExtender, IHttpListener, IScannerListener, IExtensionSta
                 redirect_uri_present= True
 
             elif 'redirect_uri' not in latest_oauth_server: 
-                # #No redirect_uri, will use tighter comparisons then
+                #No redirect_uri, will use tighter comparisons then
                 for parameter in analyzed_parameters:
                     if latest_oauth_server['response_type'] == parameter.getName().lower():
                         analyze_callback_request= True
@@ -710,21 +696,6 @@ def get_collabs_interactions_summary(collab_interactions):
                 details= details + int_name + ": " + int_value + '\n'                
     return details
 
-# def repeatByte(buf, pos, cant):
-#     print("Repeating byte offset=%d, value=%r, cant=%i"%(pos-1, buf[pos-1], cant))
-#     buf = buf[:pos-1] + buf[pos-1]*cant + buf[pos:]
-#     return buf
-
-# def insertRandomData(buf, pos, cant): 
-
-#     randomString = ""
-#     for _ in itertools.repeat(None, cant):
-#         randomString+=chr(random.randrange(0,256))
-#     print("Inserted after byte offset=0x%d random data %s"%(pos-1, randomString))
-
-#     buf = buf[:pos-1] + buf[pos-1] + bytes(randomString, encoding='utf-8') + buf[pos:]
-
-#     return buf
 
 def get_inherited_doc(issue_documentation):
     global issues_documentation
@@ -757,11 +728,12 @@ class CustomScanIssue(IScanIssue):
         global issues_documentation
         issue_documentation= get_inherited_doc(issues_documentation[issue_id]) 
         self._name = issue_documentation["name"]
-        self._issue_background = issue_documentation["issue_background"]
-        self._severity = issue_documentation["severity"]
-        self._confidence= issue_documentation["confidence"]
-        self._remediation_detail = issue_documentation["remediation_detail"]
+
         self._detail=detail
+        self._remediation_detail = issue_documentation["remediation_detail"]
+        self._confidence= issue_documentation["confidence"]
+        self._severity = issue_documentation["severity"]
+        self._issue_background = issue_documentation["issue_background"]
 
     def getUrl(self):
         return self._url
