@@ -10,6 +10,9 @@ OAuth2.0 Extender is a [Burp Suite](https://portswigger.net/burp/) extension to 
 - Lack of validation around the redirect_uri parameter, such as tampering and injection which could lead to open redirects or secrets leakage
 - Open redirection and secrets leakage via redirect_uri parameter (Burp Suite Pro only)
 - OAuth 2.0 grant types supported by the server
+
+And if you'd like to contribute to the project, the issues below are pending implementation. Make sure to read the [Collaboration](#collab) section.
+
 - [TODO] Detect third-party Javascript inclusions as explained [here](https://labs.detectify.com/2022/07/06/account-hijacking-using-dirty-dancing-in-sign-in-oauth-flows/)
 - [TODO] Redeem Access Tokens or Authorization Codes multiple times via requests replay
 - [TODO] Incorrect implementation of the PKCE mechanism if implemented (tamper with 'code_challenge' parameter)
@@ -62,6 +65,6 @@ In Extender, the logs below output the resulting Issues (useful for Community Ed
   <img src="./images/extender-small.png" />
 </p>
 
-## Reporting bugs and collaboration
+## <a name="collab"></a>Reporting bugs and collaboration
 - If you encountered a bug 🥴 and would like us to fix it, please use the GitHub [Bug Report](https://github.com/matiassequeira/burpsuite-oauth2.0/issues/new) feature
 - If you want to collaborate, please read the [CONTRIBUTING](./CONTRIBUTING.md) file. Also, feel free to reach out to any team member using your preferred mechanism
